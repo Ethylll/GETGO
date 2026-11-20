@@ -1,7 +1,8 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
 import SourceDialog from './SourceDialog.jsx'
 import SourcesPanel from './SourcesPanel.jsx'
 import { adjacentTaskIds, createLearningProgress, updateLearningProgress } from './learningProgress.js'
+import { saveLearningSession } from './learningSessionStorage.js'
 import { locateSourceReference, relatedTasksBySource } from './learningSources.js'
 
 const panels = [
@@ -38,17 +39,19 @@ function References({ references, sources, label, onOpen }) {
   )
 }
 
-export default function LearningView({ plan, sourceFiles }) {
+export default function LearningView({ plan, sourceFiles, initialProgress }) {
   const tasks = Array.isArray(plan.tasks) ? plan.tasks : []
   const [progress, dispatch] = useReducer(
     (state, action) => updateLearningProgress(tasks, state, action),
     { tasks, entryTaskId: plan.entryTaskId },
-    createLearningProgress,
+    (entry) => initialProgress ? { ...initialProgress, reviewTaskId: null } : createLearningProgress(entry),
   )
   const [openPanel, setOpenPanel] = useState(null)
   const [selectedSourceId, setSelectedSourceId] = useState(null)
   const [sourcePreview, setSourcePreview] = useState(null)
   const [sourceError, setSourceError] = useState('')
+  const [saveFailed, setSaveFailed] = useState(false)
+  const lastSave = useRef(initialProgress ? { plan, ...initialProgress } : null)
   const heading = useRef(null)
   const routeButton = useRef(null)
   const sourceTrigger = useRef(null)
@@ -62,10 +65,20 @@ export default function LearningView({ plan, sourceFiles }) {
   const isComplete = tasks.length > 0 && completedTaskIds.length === tasks.length
   const sources = new Map((plan.sources ?? []).map((source) => [source.sourceId, source]))
   const relatedTasks = relatedTasksBySource(tasks)
+  const imageUnavailableMessage = initialProgress ? '原图暂时无法恢复。' : '原图当前不可用。'
 
   useEffect(() => {
     heading.current?.focus()
   }, [displayedTaskId])
+
+  useLayoutEffect(() => {
+    const last = lastSave.current
+    if (last?.plan === plan && last.currentTaskId === currentTaskId && last.completedTaskIds === completedTaskIds) return
+
+    const next = { plan, currentTaskId, completedTaskIds }
+    lastSave.current = next
+    setSaveFailed(!saveLearningSession(plan, next))
+  }, [plan, currentTaskId, completedTaskIds])
 
   function completeTask(event, taskId) {
     const now = performance.now()
@@ -105,6 +118,7 @@ export default function LearningView({ plan, sourceFiles }) {
   return (
     <div className="mt-7 grid items-start gap-4 sm:mt-10 md:grid-cols-[3.5rem_minmax(0,1fr)] md:gap-5">
       <article className="min-w-0 rounded-[1.75rem] border border-line bg-paper px-5 py-8 sm:px-10 sm:py-12" aria-labelledby="current-task-heading">
+        {saveFailed && <p className="mb-5 rounded-xl bg-error-light px-4 py-3 text-sm text-error" role="status">学习进度暂时无法保存，刷新后可能丢失。本次打开的页面仍可继续学习。</p>}
         <div className="text-center">
           <div className="mb-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-muted">
             <span>{plan.topic}</span>
@@ -123,7 +137,7 @@ export default function LearningView({ plan, sourceFiles }) {
               </button>
             </div>
           )}
-          <h1 id="current-task-heading" ref={heading} tabIndex={-1} className="text-[clamp(2rem,5.5vw,3.75rem)] leading-tight font-semibold wrap-anywhere">
+          <h1 id="current-task-heading" ref={heading} tabIndex={-1} className="text-[clamp(2rem,5.5vw,3.75rem)] leading-tight font-semibold wrap-anywhere outline-none">
             {task?.title ?? (isComplete ? '这次资料支持的任务已完成' : '当前没有可用的学习任务')}
           </h1>
           {task && <p className="mx-auto mt-4 max-w-prose leading-relaxed text-muted">{task.objective}</p>}
@@ -227,12 +241,12 @@ export default function LearningView({ plan, sourceFiles }) {
                 </ol>
               </>
             ) : id === 'sources' ? (
-              openPanel === id && <SourcesPanel sources={sources} files={sourceFiles} relatedTasks={relatedTasks} selectedId={selectedSourceId} error={sourceError} onOpen={openSource} />
+              openPanel === id && <SourcesPanel sources={sources} files={sourceFiles} relatedTasks={relatedTasks} selectedId={selectedSourceId} error={sourceError} onOpen={openSource} imageUnavailableMessage={imageUnavailableMessage} />
             ) : <p>{placeholder}</p>}
           </div>
         ))}
       </aside>
-      {sourcePreview && <SourceDialog selection={sourcePreview} file={sourceFiles?.get(sourcePreview.source.sourceId)} onDismiss={dismissSource} />}
+      {sourcePreview && <SourceDialog selection={sourcePreview} file={sourceFiles?.get(sourcePreview.source.sourceId)} onDismiss={dismissSource} imageUnavailableMessage={imageUnavailableMessage} />}
     </div>
   )
 }

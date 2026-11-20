@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import SourceImage from './SourceImage.jsx'
 import { sourceText } from './learningSources.js'
 
-export default function SourceDialog({ selection, file, onDismiss }) {
+export default function SourceDialog({ selection, file, onDismiss, imageUnavailableMessage = '原图当前不可用。' }) {
   const dialog = useRef(null)
   const content = useRef(null)
   const highlight = useRef(null)
@@ -40,7 +40,7 @@ export default function SourceDialog({ selection, file, onDismiss }) {
           {source.error && <p className="text-sm leading-relaxed text-error">{source.error}</p>}
           {status === 'excerptMissing' && <p role="status" className="rounded-lg bg-oat px-3 py-2 text-sm text-accent">未能定位到引用片段。</p>}
           {isImage && (
-            <SourceImage file={file} alt={source.title} className="mx-auto max-h-[55dvh] max-w-full rounded-lg object-contain" onLoad={scrollToExcerpt} fallback={<p className="text-sm text-muted">原图当前不可用。</p>} />
+            <SourceImage file={file} alt={source.title} className="mx-auto max-h-[55dvh] max-w-full rounded-lg object-contain" onLoad={scrollToExcerpt} fallback={<p className="text-sm text-muted">{imageUnavailableMessage}</p>} />
           )}
           {text ? (
             <section>

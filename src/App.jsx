@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import AnalysisView from './AnalysisView.jsx'
 import LearningView from './LearningView.jsx'
 import MaterialList from './MaterialList.jsx'
+import { clearLearningSession, loadLearningSession } from './learningSessionStorage.js'
 import { checkImage, IMAGE_ACCEPT, MAX_MATERIALS } from './materials.js'
 import { useAnalysis } from './useAnalysis.js'
 
@@ -13,7 +14,10 @@ export default function App() {
   const [errors, setErrors] = useState([])
   const [notice, setNotice] = useState('')
   const [isImporting, setIsImporting] = useState(false)
+  const [startup, setStartup] = useState(loadLearningSession)
   const { analysis, sourceFiles, start, confirmPartial, clarify, returnToImport } = useAnalysis()
+  const restored = startup.status === 'restored' ? startup : null
+  const plan = restored?.plan ?? (analysis?.phase === 'learning' ? analysis.result : null)
   const isFull = materials.length === MAX_MATERIALS
   const showEmptyNotice = !materials.length && Boolean(notice)
 
@@ -172,8 +176,24 @@ export default function App() {
         </p>
       </header>
 
-      {!analysis && importPage}
-      {analysis?.phase === 'learning' && <LearningView plan={analysis.result} sourceFiles={sourceFiles} />}
+      {startup.status === 'invalid' && (
+        <section className="mx-auto mt-10 max-w-xl rounded-2xl border border-line bg-paper p-6" aria-labelledby="recovery-heading">
+          <h1 id="recovery-heading" className="text-2xl font-semibold">无法恢复上次学习</h1>
+          <p className="mt-3 leading-relaxed text-muted" role="alert">
+            {startup.reason === 'version' ? '上次会话的存储版本不兼容。' : '上次会话记录损坏或未通过校验。'}原有记录仍保留，点击重新开始后将清除这份记录。
+          </p>
+          <button type="button" className="start-button mt-5 min-h-11 rounded-full px-5 text-sm font-semibold" onClick={() => setStartup({ status: clearLearningSession() ? 'empty' : 'unavailable' })}>
+            重新开始
+          </button>
+        </section>
+      )}
+      {!analysis && !plan && startup.status !== 'invalid' && (
+        <>
+          {startup.status === 'unavailable' && <p className="mt-5 rounded-xl bg-error-light px-4 py-3 text-sm text-error" role="status">暂时无法访问本地学习记录，刷新后可能丢失进度。</p>}
+          {importPage}
+        </>
+      )}
+      {plan && <LearningView plan={plan} sourceFiles={sourceFiles} initialProgress={restored?.progress} />}
       {analysis && analysis.phase !== 'learning' && (
         <AnalysisView analysis={analysis} onConfirm={confirmPartial} onClarify={clarify} onBack={returnToImport} />
       )}
