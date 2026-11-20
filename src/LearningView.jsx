@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
+import ChatPanel from './ChatPanel.jsx'
 import SourceDialog from './SourceDialog.jsx'
 import SourcesPanel from './SourcesPanel.jsx'
 import { adjacentTaskIds, createLearningProgress, updateLearningProgress } from './learningProgress.js'
 import { saveLearningSession } from './learningSessionStorage.js'
 import { locateSourceReference, relatedTasksBySource } from './learningSources.js'
+import { useLearningChat } from './useLearningChat.js'
 
 const panels = [
   { id: 'route', label: '完整学习路线', icon: 'M9 5h11M9 12h11M9 19h11M4 5h.01M4 12h.01M4 19h.01' },
   { id: 'sources', label: '学习资料', icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z' },
-  { id: 'qa', label: 'AI 答疑', icon: 'M20 11a7 7 0 0 1-7 7H8l-4 3v-5a7 7 0 0 1-2-5V9a6 6 0 0 1 6-6h6a6 6 0 0 1 6 6ZM7 10h.01M11 10h.01M15 10h.01', placeholder: 'AI 答疑尚未接入。' },
+  { id: 'qa', label: 'AI 答疑', icon: 'M20 11a7 7 0 0 1-7 7H8l-4 3v-5a7 7 0 0 1-2-5V9a6 6 0 0 1 6-6h6a6 6 0 0 1 6 6ZM7 10h.01M11 10h.01M15 10h.01' },
 ]
 
 const taskStatus = {
@@ -39,7 +41,7 @@ function References({ references, sources, label, onOpen }) {
   )
 }
 
-export default function LearningView({ plan, sourceFiles, initialProgress }) {
+export default function LearningView({ plan, sourceFiles, initialProgress, initialMessages }) {
   const tasks = Array.isArray(plan.tasks) ? plan.tasks : []
   const [progress, dispatch] = useReducer(
     (state, action) => updateLearningProgress(tasks, state, action),
@@ -51,9 +53,11 @@ export default function LearningView({ plan, sourceFiles, initialProgress }) {
   const [sourcePreview, setSourcePreview] = useState(null)
   const [sourceError, setSourceError] = useState('')
   const [saveFailed, setSaveFailed] = useState(false)
-  const lastSave = useRef(initialProgress ? { plan, ...initialProgress } : null)
+  const { messages, pendingTaskId, sendQuestion } = useLearningChat(plan, initialMessages)
+  const lastSave = useRef(initialProgress ? { plan, ...initialProgress, messages } : null)
   const heading = useRef(null)
   const routeButton = useRef(null)
+  const sourcesButton = useRef(null)
   const sourceTrigger = useRef(null)
   const lastCompleteClick = useRef(-Infinity)
   const { currentTaskId, completedTaskIds, reviewTaskId } = progress
@@ -73,12 +77,12 @@ export default function LearningView({ plan, sourceFiles, initialProgress }) {
 
   useLayoutEffect(() => {
     const last = lastSave.current
-    if (last?.plan === plan && last.currentTaskId === currentTaskId && last.completedTaskIds === completedTaskIds) return
+    if (last?.plan === plan && last.currentTaskId === currentTaskId && last.completedTaskIds === completedTaskIds && last.messages === messages) return
 
-    const next = { plan, currentTaskId, completedTaskIds }
+    const next = { plan, currentTaskId, completedTaskIds, messages }
     lastSave.current = next
     setSaveFailed(!saveLearningSession(plan, next))
-  }, [plan, currentTaskId, completedTaskIds])
+  }, [plan, currentTaskId, completedTaskIds, messages])
 
   function completeTask(event, taskId) {
     const now = performance.now()
@@ -112,7 +116,10 @@ export default function LearningView({ plan, sourceFiles, initialProgress }) {
   function dismissSource() {
     setSourcePreview(null)
     const trigger = sourceTrigger.current
-    requestAnimationFrame(() => trigger?.isConnected && trigger.focus({ preventScroll: true }))
+    requestAnimationFrame(() => {
+      const target = trigger?.isConnected && trigger.getClientRects().length ? trigger : sourcesButton.current
+      target?.focus({ preventScroll: true })
+    })
   }
 
   return (
@@ -210,15 +217,15 @@ export default function LearningView({ plan, sourceFiles, initialProgress }) {
       <aside className="relative z-10 order-first min-w-0" aria-label="学习工具">
         <div className="flex w-fit gap-1 rounded-2xl border border-line bg-paper p-1 md:flex-col">
           {panels.map(({ id, label, icon }) => (
-            <button key={id} id={`panel-button-${id}`} ref={id === 'route' ? routeButton : undefined} type="button" aria-label={label} title={label} aria-expanded={openPanel === id} aria-controls={`panel-${id}`} className="grid size-11 place-items-center rounded-xl text-accent hover:bg-oat aria-expanded:bg-oat" onClick={() => setOpenPanel(openPanel === id ? null : id)}>
+            <button key={id} id={`panel-button-${id}`} ref={id === 'route' ? routeButton : id === 'sources' ? sourcesButton : undefined} type="button" aria-label={label} title={label} aria-expanded={openPanel === id} aria-controls={`panel-${id}`} className="grid size-11 place-items-center rounded-xl text-accent hover:bg-oat aria-expanded:bg-oat" onClick={() => setOpenPanel(openPanel === id ? null : id)}>
               <svg aria-hidden="true" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                 <path d={icon} />
               </svg>
             </button>
           ))}
         </div>
-        {panels.map(({ id, label, placeholder }) => (
-          <div key={id} id={`panel-${id}`} hidden={openPanel !== id} role="region" aria-labelledby={`panel-button-${id}`} className={`mt-2 rounded-2xl border border-line bg-paper p-4 text-sm leading-relaxed text-muted md:absolute md:top-0 md:left-full md:mt-0 md:ml-2 md:shadow-sm ${id === 'sources' ? 'md:w-72' : 'md:w-60'}`}>
+        {panels.map(({ id, label }) => (
+          <div key={id} id={`panel-${id}`} hidden={openPanel !== id} role="region" aria-labelledby={`panel-button-${id}`} className={`mt-2 rounded-2xl border border-line bg-paper p-4 text-sm leading-relaxed text-muted md:absolute md:top-0 md:left-full md:mt-0 md:ml-2 md:shadow-sm ${id === 'route' ? 'md:w-60' : 'md:w-80'}`}>
             <h2 className="mb-2 font-semibold text-ink">{label}</h2>
             {id === 'route' ? (
               <>
@@ -242,7 +249,7 @@ export default function LearningView({ plan, sourceFiles, initialProgress }) {
               </>
             ) : id === 'sources' ? (
               openPanel === id && <SourcesPanel sources={sources} files={sourceFiles} relatedTasks={relatedTasks} selectedId={selectedSourceId} error={sourceError} onOpen={openSource} imageUnavailableMessage={imageUnavailableMessage} />
-            ) : <p>{placeholder}</p>}
+            ) : <ChatPanel key={task?.id ?? 'no-task'} task={task} canAsk={Boolean(task && task.id === currentTaskId)} messages={messages} pendingTaskId={pendingTaskId} sources={sources} onSend={sendQuestion} onOpenSource={openSource} visible={openPanel === id} />}
           </div>
         ))}
       </aside>

@@ -193,7 +193,7 @@ export default function App() {
           {importPage}
         </>
       )}
-      {plan && <LearningView plan={plan} sourceFiles={sourceFiles} initialProgress={restored?.progress} />}
+      {plan && <LearningView plan={plan} sourceFiles={sourceFiles} initialProgress={restored?.progress} initialMessages={restored?.messages} />}
       {analysis && analysis.phase !== 'learning' && (
         <AnalysisView analysis={analysis} onConfirm={confirmPartial} onClarify={clarify} onBack={returnToImport} />
       )}

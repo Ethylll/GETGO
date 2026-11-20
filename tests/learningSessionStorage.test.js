@@ -4,6 +4,7 @@ import test from 'node:test'
 import { createLearningProgress, updateLearningProgress } from '../src/learningProgress.js'
 import { clearLearningSession, LEARNING_SESSION_KEY, loadLearningSession, saveLearningSession } from '../src/learningSessionStorage.js'
 import { planLearning, readSources } from '../src/services/analysisService.js'
+import { taskChatHistory } from '../src/chatMessages.js'
 
 const original = '吉他入门。把乐器放稳。\n原文保留换行。Em 和弦：按住第五弦和第四弦的第二品。逐根拨弦，确认声音清楚。'
 
@@ -119,4 +120,28 @@ test('存储不可访问或空间不足时不抛出，也不会改动内存中�
   assert.equal(clearLearningSession({ removeItem: error }), false)
   assert.equal(saveLearningSession(plan, progress, { setItem: error }), false)
   assert.deepEqual(progress, createLearningProgress(plan))
+})
+
+test('刷新后恢复答疑历史和引用，按任务筛选上下文，未完成请求恢复为已中断', async () => {
+  const storage = memoryStorage()
+  const plan = await learningPlan()
+  const base = { createdAt: 1730000000000, status: 'answered' }
+  const first = { ...base, id: 'a', taskId: 'posture', question: '如何持琴？', answer: '把乐器放稳。', citations: [{ sourceId: 'text', excerpt: '把乐器放稳。' }] }
+  const nextRef = plan.tasks[1].sourceRefs[0]
+  const second = { ...base, id: 'b', taskId: 'chord', question: '和弦怎么按？', answer: nextRef.excerpt, citations: [nextRef] }
+  const pending = { ...base, id: 'pending', taskId: 'posture', question: '接下来呢？', status: 'pending', request: { temporary: 'discard' } }
+  assert.equal(saveLearningSession(plan, { ...createLearningProgress(plan), messages: [first, second, pending] }, storage), true)
+
+  const loaded = loadLearningSession(storage)
+  assert.deepEqual(loaded.messages.slice(0, 2), [first, second])
+  assert.deepEqual(loaded.messages[2], { id: pending.id, taskId: 'posture', question: pending.question, status: 'interrupted', createdAt: pending.createdAt, answer: '', citations: [] })
+  assert.deepEqual(taskChatHistory(loaded.messages, 'posture'), [{ taskId: 'posture', question: first.question, answer: first.answer }])
+  assert.doesNotMatch(storage.getItem(LEARNING_SESSION_KEY), /temporary|"request"/)
+
+  const oldSnapshot = JSON.parse(storage.getItem(LEARNING_SESSION_KEY))
+  oldSnapshot.messages[0].citations[0].excerpt = '无效引文'
+  storage.setItem(LEARNING_SESSION_KEY, JSON.stringify(oldSnapshot))
+  const recovered = loadLearningSession(storage)
+  assert.equal(recovered.progress.currentTaskId, 'posture')
+  assert.deepEqual(recovered.messages.map(({ id }) => id), ['b', 'pending'])
 })
