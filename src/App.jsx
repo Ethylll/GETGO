@@ -13,7 +13,7 @@ export default function App() {
   const [errors, setErrors] = useState([])
   const [notice, setNotice] = useState('')
   const [isImporting, setIsImporting] = useState(false)
-  const { analysis, start, confirmPartial, clarify, returnToImport } = useAnalysis()
+  const { analysis, sourceFiles, start, confirmPartial, clarify, returnToImport } = useAnalysis()
   const isFull = materials.length === MAX_MATERIALS
   const showEmptyNotice = !materials.length && Boolean(notice)
 
@@ -173,7 +173,7 @@ export default function App() {
       </header>
 
       {!analysis && importPage}
-      {analysis?.phase === 'learning' && <LearningView plan={analysis.result} />}
+      {analysis?.phase === 'learning' && <LearningView plan={analysis.result} sourceFiles={sourceFiles} />}
       {analysis && analysis.phase !== 'learning' && (
         <AnalysisView analysis={analysis} onConfirm={confirmPartial} onClarify={clarify} onBack={returnToImport} />
       )}

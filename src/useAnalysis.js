@@ -5,6 +5,7 @@ const STAGE_DISPLAY_MS = 320
 
 export function useAnalysis() {
   const [analysis, setAnalysis] = useState(null)
+  const [sourceFiles, setSourceFiles] = useState(null)
   const running = useRef(false)
 
   async function run(operation) {
@@ -27,7 +28,10 @@ export function useAnalysis() {
 
   function start(materials) {
     const batch = createAnalysisBatch(materials)
-    return run((onStage) => startAnalysis(batch, onStage))
+    return run((onStage) => {
+      setSourceFiles(new Map(batch.filter(({ file }) => file).map(({ sourceId, file }) => [sourceId, file])))
+      return startAnalysis(batch, onStage)
+    })
   }
 
   function confirmPartial() {
@@ -39,8 +43,10 @@ export function useAnalysis() {
   }
 
   function returnToImport() {
-    if (!running.current) setAnalysis(null)
+    if (running.current) return
+    setAnalysis(null)
+    setSourceFiles(null)
   }
 
-  return { analysis, start, confirmPartial, clarify, returnToImport }
+  return { analysis, sourceFiles, start, confirmPartial, clarify, returnToImport }
 }
