@@ -49,7 +49,7 @@ export async function readSources({ sources = [] } = {}) {
   return result('ready', processedSources, { requiresConfirmation: usableCount < processedSources.length })
 }
 
-export async function planLearning({ sources = [], clarification, confirmPartial = false } = {}) {
+export async function planLearning({ sources = [], clarification, confirmPartial = false, onStage } = {}) {
   const usableSources = sources.filter((source) => source.status === 'processed')
   if (!usableSources.length) return result('unavailable', sources, { message: NO_PLAN })
 
@@ -60,6 +60,7 @@ export async function planLearning({ sources = [], clarification, confirmPartial
     })
   }
 
+  await onStage?.('identifying')
   const { topic, keywords, clarificationQuestion, lessons } = guitarScenario
   const sourceText = (source) => source.type === 'text' ? source.text : source.extractedText
   const mentionsGuitar = (text) => keywords.some((keyword) => text?.toLowerCase().includes(keyword))
@@ -69,9 +70,9 @@ export async function planLearning({ sources = [], clarification, confirmPartial
     return result('needsClarification', sources, { question: clarificationQuestion })
   }
 
+  await onStage?.('organizing')
   const findSource = (excerpt) => usableSources.find((source) => sourceText(source)?.includes(excerpt))
-  const tasks = []
-  const knowledgePoints = []
+  const selectedLessons = new Map()
   const coverageGaps = []
   const notices = []
 
@@ -83,11 +84,21 @@ export async function planLearning({ sources = [], clarification, confirmPartial
       continue
     }
 
-    if (matches.some((source) => !source) || lesson.prerequisiteTaskIds.some((id) => !tasks.some((task) => task.id === id))) {
+    if (matches.some((source) => !source) || lesson.prerequisiteTaskIds.some((id) => !selectedLessons.has(id))) {
       coverageGaps.push(`可用资料不足以支持${lesson.knowledgeTitle}练习及其前置步骤。`)
       continue
     }
 
+    selectedLessons.set(lesson.id, { lesson, matches })
+  }
+
+  if (!selectedLessons.size) return result('unavailable', sources, { message: NO_PLAN, notices })
+
+  await onStage?.('generating')
+  const tasks = []
+  const knowledgePoints = []
+
+  for (const { lesson, matches } of selectedLessons.values()) {
     const steps = lesson.steps.map(({ text, excerpt }, index) => ({
       text,
       sourceRefs: [{ sourceId: matches[index].sourceId, excerpt }],
@@ -112,8 +123,6 @@ export async function planLearning({ sources = [], clarification, confirmPartial
       sourceRefs,
     })
   }
-
-  if (!tasks.length) return result('unavailable', sources, { message: NO_PLAN, notices })
 
   return result('ready', sources, {
     topic,

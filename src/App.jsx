@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react'
+import AnalysisView from './AnalysisView.jsx'
+import LearningView from './LearningView.jsx'
 import MaterialList from './MaterialList.jsx'
 import { checkImage, IMAGE_ACCEPT, MAX_MATERIALS } from './materials.js'
+import { useAnalysis } from './useAnalysis.js'
 
 export default function App() {
   const fileInput = useRef(null)
@@ -10,6 +13,7 @@ export default function App() {
   const [errors, setErrors] = useState([])
   const [notice, setNotice] = useState('')
   const [isImporting, setIsImporting] = useState(false)
+  const { analysis, start, confirmPartial, clarify, returnToImport } = useAnalysis()
   const isFull = materials.length === MAX_MATERIALS
   const showEmptyNotice = !materials.length && Boolean(notice)
 
@@ -77,16 +81,17 @@ export default function App() {
     setNotice('')
   }
 
-  return (
-    <main className="mx-auto w-full max-w-[68rem] px-5 pb-12 sm:px-10 sm:pb-16">
-      <header className="flex items-center gap-3 border-b border-line py-5 sm:py-6">
-        <span className="brand-mark" aria-hidden="true">↗</span>
-        <p className="flex items-baseline gap-2 text-xl font-bold tracking-tight">
-          开练<span className="text-line-strong" aria-hidden="true">|</span>
-          <span className="text-sm font-extrabold tracking-[0.14em]">GETGO</span>
-        </p>
-      </header>
+  function handleStart() {
+    if (isImporting || analysis) return
+    if (!materials.length) {
+      setNotice('请至少给我一份资料哦~')
+      return
+    }
+    start(materials)
+  }
 
+  const importPage = (
+    <>
       <section className="py-9 text-center sm:pt-14 sm:pb-11" aria-labelledby="home-heading">
         <h1 id="home-heading" className="hero-heading text-[clamp(1.65rem,6.3vw,3.55rem)] leading-tight font-semibold">
           只要想做，就能开始
@@ -145,17 +150,33 @@ export default function App() {
           className="start-button min-h-13 w-full rounded-full px-8 text-base font-semibold sm:w-60"
           disabled={isImporting}
           aria-describedby="start-help"
-          onClick={() => setNotice(materials.length
-            ? '资料已添加。本次仅支持导入资料，分析功能尚未接入。'
-            : '请至少给我一份资料哦~')}
+          onClick={handleStart}
         >
           <span aria-live="polite">{showEmptyNotice ? notice : '我要开始！'}</span>
           {!showEmptyNotice && <span className="ml-2" aria-hidden="true">→</span>}
         </button>
         <p id="start-help" role="status" className="mt-3 empty:mt-0 text-sm leading-relaxed text-muted">
-          {isImporting ? '图片检查完成后即可开始。' : materials.length > 0 ? notice : ''}
+          {isImporting ? '图片检查完成后即可开始。' : ''}
         </p>
       </div>
+    </>
+  )
+
+  return (
+    <main className="mx-auto w-full max-w-[68rem] px-5 pb-12 sm:px-10 sm:pb-16">
+      <header className="flex items-center gap-3 border-b border-line py-5 sm:py-6">
+        <span className="brand-mark" aria-hidden="true">↗</span>
+        <p className="flex items-baseline gap-2 text-xl font-bold tracking-tight">
+          开练<span className="text-line-strong" aria-hidden="true">|</span>
+          <span className="text-sm font-extrabold tracking-[0.14em]">GETGO</span>
+        </p>
+      </header>
+
+      {!analysis && importPage}
+      {analysis?.phase === 'learning' && <LearningView plan={analysis.result} />}
+      {analysis && analysis.phase !== 'learning' && (
+        <AnalysisView analysis={analysis} onConfirm={confirmPartial} onClarify={clarify} onBack={returnToImport} />
+      )}
     </main>
   )
 }
