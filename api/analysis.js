@@ -68,6 +68,7 @@ export function createAnalysisHandler({ env = process.env, fetchImpl = globalThi
       if (sources?.tooLarge) return fail('资料文字合计超过 60,000 字符，请缩减资料后重试。', 413)
       if (!sources || !['identify', 'plan'].includes(input.action) ||
         (input.clarification !== undefined && !boundedText(input.clarification, 600)) ||
+        (input.planVersion !== undefined && (input.action !== 'plan' || ![1, 2].includes(input.planVersion))) ||
         (input.action === 'plan' && !boundedText(input.topic, 160))) return fail('资料或分析参数未通过校验。', 400)
       if (!sources.some(({ status }) => status === 'processed')) {
         return json(analysisResult('unavailable', sources, { message: '没有可用于规划学习路线的资料。' }))
@@ -92,7 +93,7 @@ export function createAnalysisHandler({ env = process.env, fetchImpl = globalThi
       if (image) return json({ ...source, ...await extractImage(model, image) })
       return json(input.action === 'identify'
         ? await identifyLearning(model, sources, input.clarification)
-        : await generateLearningPlan(model, sources, input.topic))
+        : await generateLearningPlan(model, sources, input.topic, input.planVersion))
     } catch (error) {
       if (signal.aborted) return fail('DeepSeek 分析超时，请稍后重试。', 504)
       if (error.status === 429) return fail('DeepSeek 暂时繁忙，请稍后重试。', 429)

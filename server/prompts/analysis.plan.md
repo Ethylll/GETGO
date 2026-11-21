@@ -11,3 +11,17 @@
 仅输出 JSON。所有 sourceRefs 都指向输入真实 sourceId，excerpt 使用相应资料中的连续逐字片段。每个知识点和任务有引用，任务的每个步骤也须分别提供有效引用。知识点和任务的前置 ID 必须出现在各自列表更早的位置。不引用未列出的节点。使用简短且互不重复的 ID。每任务 2 至 5 个具体、可执行步骤，最多 20 项任务，最多 40 个知识点。如果一个动作不足两步，应与相关的相邻动作合并，不能补造比较、复盘、检查标准或新的操作来凑两步。coverageGaps 简短说明当前资料未覆盖但有助于理解学习范围的内容。
 
 格式示例 {"status":"ready","hasConflict":false,"coverageGaps":[],"knowledgePoints":[{"id":"k1","title":"知识点","prerequisiteIds":[],"sourceRefs":[{"sourceId":"输入ID","excerpt":"逐字原文"}]}],"tasks":[{"id":"t1","title":"动手任务","objective":"可验收的目标","prerequisiteTaskIds":[],"knowledgePointIds":["k1"],"sourceRefs":[{"sourceId":"输入ID","excerpt":"逐字原文"}],"steps":[{"text":"执行动作","sourceRefs":[{"sourceId":"输入ID","excerpt":"逐字原文"}]},{"text":"检查结果","sourceRefs":[{"sourceId":"输入ID","excerpt":"逐字原文"}]}]}],"entryTaskId":"t1"}。
+
+## V2 任务协议
+
+本节为规划 Prompt v2.0。上面的示例只说明共用字段，遇到 planVersion 2 时还必须提供下面的新字段。
+
+在上述输出的每项任务内增加 type（oneTime 或 recurring）、estimatedMinutes（1 至 dailyLimits.minutes 的整数）、completionCriteria（当次可观察结果）及 prerequisiteGates 数组。时长是教学估算，不需填满每日配额；一项任务应能在一日内执行。程序另行填写初始状态。适合反复训练的实践任务用 recurring；准备、理解过程或单次操作用 oneTime。不要求路线中一定有周期任务，也不把单次完成或累计次数当作技能掌握。有实际可并行内容时，不将周期练习设为后续新知的默认前置。
+
+每项 recurring 增加 practice，例如 {"startCondition":"immediate","frequency":{"unit":"learningDay","interval":1,"basis":"recommendation"},"reviewAfter":{"unit":"learningDay","interval":3,"basis":"recommendation"},"longTermGoal":"持续练习目标","reviewCriteria":{"stop":"何时考虑停止","reduce":"何时考虑减量","adjust":"何时考虑调整"}}。有前置依赖时 startCondition 使用 afterPrerequisites。oneTime 不输出 practice。复核节点提示检查实际反馈，不自动结业、加量或降低标准。
+
+frequency 和 reviewAfter 各自独立。frequency 描述下一次练习的间隔，reviewAfter 描述何时复核，练习间隔不能冒充复核节点。各字段默认用 learningDay。原文明确要求自然时间间隔时，该字段必须用 elapsedMinutes，例如「相隔48小时」用 2880，不能改写为 2 个学习日。设置 basis 为 source，并写入匹配语义的逐字 sourceRefs。资料未提供安排时用 recommendation，省去该时间字段的 sourceRefs。任务事实和动作仍各有原文引用。
+
+prerequisiteGates 只列 prerequisiteTaskIds 中真正属于 recurring 的前置任务，每个前置任务一项。等到一次可观察的练习入门任务达成其单次完成标准时，可用 {"taskId":"前置练习ID","kind":"practiceCompletion"}。确实需要可观察自检反馈时，用 {"taskId":"前置练习ID","kind":"selfCheckFeedback","criterion":"具体验收条件"}。没有这类明确必要门槛时，不把周期练习列为前置，数组返回 []。不使用累计练习量或模型推定的掌握状态当作门槛。
+
+最终逐个检查：每项（包括与其他任务并行的周期练习）都有至少一个 knowledgePointIds，且该知识点必须列在 knowledgePoints 中并引用该任务的实际资料。例如并行「整理」与「排线」分别对应各自的知识点，两个任务的前置数组可为空，但 knowledgePointIds 都不为空。

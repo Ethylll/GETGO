@@ -82,7 +82,7 @@ export function createAnalysisService({ fetchImpl = (...args) => fetch(...args) 
     return { status: 'ready', mode: 'real', sources: result, notices: [], requiresConfirmation: count < result.length }
   }
 
-  async function planLearning({ sources = [], confirmPartial, clarification, onStage } = {}) {
+  async function planLearning({ sources = [], confirmPartial, clarification, onStage, planVersion = 1 } = {}) {
     const usable = sources.filter(({ status }) => status === 'processed')
     if (!usable.length) return unavailable(sources, '现有资料不足，无法生成可靠的学习计划。')
     if (usable.length !== sources.length && confirmPartial !== true) {
@@ -98,12 +98,14 @@ export function createAnalysisService({ fetchImpl = (...args) => fetch(...args) 
       if (topic.status !== 'ready') return { ...topic, sources }
 
       await onStage?.('organizing')
-      const proposed = await send({ action: 'plan', sources, confirmPartial, topic: topic.topic })
+      const proposed = await send({ action: 'plan', sources, confirmPartial, topic: topic.topic,
+        ...(planVersion === 2 ? { planVersion } : {}) })
       if (proposed.status !== 'ready') return { ...proposed, sources }
 
       await onStage?.('generating')
       // Check against the actual imported batch, never against the provider's copy of evidence.
-      if (proposed.mode === 'real' && isValidLearningPlan(proposed, sources) && Array.isArray(proposed.coverageGaps) &&
+      if (proposed.mode === 'real' && (proposed.planVersion ?? 1) === planVersion &&
+        isValidLearningPlan(proposed, sources) && Array.isArray(proposed.coverageGaps) &&
         Array.isArray(proposed.notices)) return { ...proposed, sources }
       return unavailable(sources, '学习计划的任务或来源引用未通过校验，无法生成可靠的学习计划。')
     } catch {

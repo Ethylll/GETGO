@@ -1,0 +1,22 @@
+[
+  {
+    "id": "v2-mixed",
+    "types": ["oneTime", "recurring"],
+    "frequency": { "unit": "learningDay", "basis": "recommendation" },
+    "sources": [
+      "键盘入门笔记。一次性认识键位：找到两个一组的黑键，把左侧相邻的白键标作 C，再核对位置。",
+      "另有独立的循环练习，需要重复训练节奏稳定性。交替拍手和敲桌面，先慢速做完一轮，再听每拍是否均匀。这个练习不依赖认识键位。"
+    ]
+  },
+  {
+    "id": "v2-one-time",
+    "types": ["oneTime"],
+    "sources": ["一次性整理这次读书笔记：写下书名，对照封面核对名称。选出一条标记过的句子，原样抄在书名下方。整理好这一页即可结束。"]
+  },
+  {
+    "id": "v2-elapsed",
+    "types": ["recurring"],
+    "frequency": { "unit": "elapsedMinutes", "interval": 2880, "basis": "source" },
+    "sources": ["排线控制是需要持续重复的练习。自然时间上必须至少相隔48小时再做下一次排线练习。每次画一组平行线，随后对照检查线的方向是否一致。"]
+  }
+]

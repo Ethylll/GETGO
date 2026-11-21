@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises'
-import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan } from '../src/services/validateLearningPlan.js'
+import {
+  DEFAULT_LEARNING_DAY_LIMITS, explicitElapsedMinutes, hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidV2Task,
+} from '../src/services/validateLearningPlan.js'
 import { sourceText } from '../src/learningSources.js'
 
 const endpoint = 'https://api.deepseek.com/chat/completions'
@@ -15,6 +17,7 @@ const prompts = {
   plan: new URL('./prompts/analysis.plan.md', import.meta.url),
   review: new URL('./prompts/analysis.review.md', import.meta.url),
 }
+const v2PromptSection = '\n## V2 任务协议'
 
 export function boundedText(value, limit) {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= limit
@@ -72,7 +75,8 @@ class ModelError extends Error {
 
 export function createAnalysisModel({ key, model, fetchImpl, signal }) {
   return async function request(stage, content, maxTokens, validate) {
-    const system = await readFile(prompts[stage], 'utf8')
+    const prompt = await readFile(prompts[stage], 'utf8')
+    const system = content.planVersion === 2 ? prompt : prompt.split(v2PromptSection)[0]
     for (let attempt = 0; attempt < 2; attempt++) {
       const response = await fetchImpl(endpoint, {
         method: 'POST', redirect: 'error', signal,
@@ -144,11 +148,24 @@ function evidenceFor(sources) {
     ({ sourceId, title, type, text: type === 'text' ? text : extractedText }))
 }
 
+function initializeV2Task(proposal, evidenceById) {
+  const task = { ...proposal, status: 'notStarted' }
+  const frequency = task.practice?.frequency
+  if (task.type === 'recurring' && frequency?.basis === 'source' && hasValidSourceRefs(frequency.sourceRefs, evidenceById)) {
+    const intervals = new Set(explicitElapsedMinutes(frequency.sourceRefs))
+    if (intervals.size === 1) {
+      const [interval] = intervals
+      task.practice = { ...task.practice, frequency: { ...frequency, unit: 'elapsedMinutes', interval } }
+    }
+  }
+  return task
+}
+
 // Validate each node against independent evidence, then keep only nodes whose dependencies survived.
-export function prunePlan(draft, sources, rejected = new Set()) {
+export function prunePlan(draft, sources, rejected = new Set(), planVersion = 1) {
   const evidenceById = indexSourceEvidence(sources)
   const points = new Map()
-  const tasks = new Set()
+  const tasks = new Map()
   const orderedTasks = []
   for (const point of draft.knowledgePoints) {
     if (boundedText(point.title, 240) && Array.isArray(point.prerequisiteIds) &&
@@ -156,14 +173,17 @@ export function prunePlan(draft, sources, rejected = new Set()) {
       points.set(point.id, point)
     }
   }
-  for (const task of draft.tasks) {
+  for (const proposal of draft.tasks) {
+    const task = planVersion === 2 ? initializeV2Task(proposal, evidenceById) : proposal
     if (rejected.has(task.id) || !Array.isArray(task.prerequisiteTaskIds) || !task.prerequisiteTaskIds.every((id) => tasks.has(id)) ||
       !Array.isArray(task.knowledgePointIds) || !task.knowledgePointIds.length || !task.knowledgePointIds.every((id) => points.has(id)) ||
       !boundedText(task.title, 240) || !boundedText(task.objective, 350) ||
       !hasValidSourceRefs(task.sourceRefs, evidenceById) || !Array.isArray(task.steps) ||
       task.steps.length < 2 || task.steps.length > 5 || !task.steps.every((step) =>
         boundedText(step?.text, 350) && hasValidSourceRefs(step.sourceRefs, evidenceById))) continue
-    tasks.add(task.id)
+    if (planVersion === 2 && !isValidV2Task(task,
+      task.prerequisiteTaskIds.filter((id) => tasks.get(id).type === 'recurring'), evidenceById)) continue
+    tasks.set(task.id, task)
     orderedTasks.push(task)
   }
   const usedPoints = new Set(orderedTasks.flatMap((task) => task.knowledgePointIds))
@@ -176,7 +196,7 @@ export function prunePlan(draft, sources, rejected = new Set()) {
   return { tasks: orderedTasks, knowledgePoints, entryTaskId: entry?.id }
 }
 
-export async function generateLearningPlan(request, sources, topic) {
+export async function generateLearningPlan(request, sources, topic, planVersion = 1) {
   const evidence = evidenceFor(sources)
   const isDraft = (value) =>
     value?.status === 'unavailable' && boundedText(value.reason, 350) && typeof value.hasConflict === 'boolean' ||
@@ -184,30 +204,43 @@ export async function generateLearningPlan(request, sources, topic) {
     hasIds(value.tasks) && Array.isArray(value.knowledgePoints) && value.knowledgePoints.length <= 40 &&
     hasIds(value.knowledgePoints) && boundedText(value.entryTaskId, 80) && stringList(value.coverageGaps) &&
     typeof value.hasConflict === 'boolean'
-  const input = { topic, sources: evidence }
+  const protocol = planVersion === 2 ? { planVersion, dailyLimits: DEFAULT_LEARNING_DAY_LIMITS } : {}
+  const input = { topic, sources: evidence, ...protocol }
+  const prune = (draft, rejected) => prunePlan(draft, sources, rejected, planVersion)
   const initial = await request('plan', input, 9500, isDraft)
+  const initialCount = initial.status === 'ready' ? prune(initial).tasks.length : 0
   const recovery = initial.status === 'unavailable' && initial.hasConflict ? { recoverIndependentTasks: true }
-    : initial.status === 'ready' && !prunePlan(initial, sources).tasks.length ? { repairEvidence: true } : null
-  const draft = recovery ? await request('plan', { ...input, ...recovery }, 9500, isDraft) : initial
+    : initial.status === 'ready' && (!initialCount || (planVersion === 2 && initialCount < initial.tasks.length))
+      ? { repairEvidence: true } : null
+  const alternative = recovery ? await request('plan', { ...input, ...recovery }, 9500, isDraft).catch((error) => {
+    if (!initialCount) throw error
+    return null
+  }) : null
+  // An unsuccessful repair must not discard independently valid tasks from the first draft.
+  const alternativeCount = alternative?.status === 'ready' ? prune(alternative).tasks.length : 0
+  const improves = alternativeCount > initialCount ||
+    (alternativeCount === initialCount && initialCount > 0 && alternative?.tasks?.length < initial.tasks.length)
+  const draft = initialCount && !improves
+    ? initial : (alternative ?? initial)
   const reportedConflict = initial.hasConflict || draft.hasConflict
   const fail = (message, hasConflict = reportedConflict) => analysisResult('unavailable', sources, {
     message, notices: hasConflict ? [conflictNotice] : [],
   })
   if (draft.status === 'unavailable') return fail(draft.reason)
-  const candidate = prunePlan(draft, sources)
+  const candidate = prune(draft)
   if (!candidate.tasks.length) return fail(noPlan)
 
-  const review = await request('review', { topic, sources: evidence, ...candidate }, 2400, (value) => {
+  const review = await request('review', { ...input, ...candidate }, 2400, (value) => {
     if (!Array.isArray(value?.verdicts) || value.verdicts.length !== candidate.tasks.length) return false
     const expected = new Set(candidate.tasks.map(({ id }) => id))
     return value.verdicts.every((item) => expected.delete(item?.id) && ['supported', 'unsupported', 'conflict'].includes(item.verdict))
   })
   const rejected = new Set(review.verdicts.filter(({ verdict }) => verdict !== 'supported').map(({ id }) => id))
   const hasConflict = reportedConflict || review.verdicts.some(({ verdict }) => verdict === 'conflict')
-  const retained = prunePlan(draft, sources, rejected)
+  const retained = prune(draft, rejected)
   if (!retained.tasks.length) return fail(noPlan, hasConflict)
   const plan = analysisResult('ready', sources, {
-    topic, ...retained,
+    topic, ...retained, ...(planVersion === 2 ? { planVersion } : {}),
     supportedScope: retained.knowledgePoints.map(({ title }) => title).join('、'),
     coverageGaps: [...new Set([...draft.coverageGaps,
       ...(retained.tasks.length !== draft.tasks.length ? ['部分内容因依据或前置关系未通过检查而未纳入路线。'] : []),
