@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { continueAnalysis, createAnalysisBatch, startAnalysis } from '../src/analysisFlow.js'
+import { continueAnalysis as proceed, createAnalysisBatch, startAnalysis as start } from '../src/analysisFlow.js'
+import * as mock from './fixtures/mockAnalysis.js'
+
+const startAnalysis = (sources, stage) => start(sources, stage, mock)
+const continueAnalysis = (request, stage) => proceed(request, stage, mock)
 
 const posture = '把乐器放稳。练习前先放松肩膀。'
 const guitar = (text = `吉他入门。${posture}`) => ({ id: 5, type: 'text', text })

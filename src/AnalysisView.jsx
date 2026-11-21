@@ -54,7 +54,7 @@ export default function AnalysisView({ analysis, onConfirm, onClarify, onBack })
 
   return (
     <section className="mx-auto mt-8 max-w-2xl rounded-[1.75rem] border border-line bg-paper px-5 py-6 sm:mt-14 sm:p-9" aria-labelledby="analysis-heading">
-      <p className="mb-3 text-sm font-medium text-accent">Mock 模拟分析</p>
+      <p className="mb-3 text-sm font-medium text-accent">DeepSeek 资料分析</p>
       <h1 id="analysis-heading" ref={heading} tabIndex={-1} className="mb-5 text-2xl leading-tight font-semibold sm:text-3xl">
         {titles[phase]}
       </h1>
@@ -97,7 +97,7 @@ export default function AnalysisView({ analysis, onConfirm, onClarify, onBack })
           if (answer.trim()) onClarify(answer.trim())
         }}>
           <label htmlFor="analysis-answer" className="block leading-relaxed">{result.question}</label>
-          <input id="analysis-answer" type="text" className="w-full rounded-xl border border-line bg-sheet px-4 py-3 text-base" value={answer} onChange={(event) => setAnswer(event.target.value)} />
+          <input id="analysis-answer" type="text" maxLength={600} className="w-full rounded-xl border border-line bg-sheet px-4 py-3 text-base" value={answer} onChange={(event) => setAnswer(event.target.value)} />
           <div className="flex flex-wrap gap-3">
             <button type="submit" className="start-button min-h-11 rounded-full px-5 text-sm font-semibold" disabled={!answer.trim()}>
               提交回答

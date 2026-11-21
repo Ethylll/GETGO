@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { createLearningProgress, updateLearningProgress } from '../src/learningProgress.js'
 import { clearLearningSession, LEARNING_SESSION_KEY, loadLearningSession, saveLearningSession } from '../src/learningSessionStorage.js'
-import { planLearning, readSources } from '../src/services/analysisService.js'
+import { planLearning, readSources } from './fixtures/mockAnalysis.js'
 import { taskChatHistory } from '../src/chatMessages.js'
 
 const original = '吉他入门。把乐器放稳。\n原文保留换行。Em 和弦：按住第五弦和第四弦的第二品。逐根拨弦，确认声音清楚。'

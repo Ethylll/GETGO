@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { planLearning, readSources } from '../src/services/analysisService.js'
+import { planLearning, readSources } from './fixtures/mockAnalysis.js'
 import { isValidLearningPlan } from '../src/services/validateLearningPlan.js'
 
 const posture = '把乐器放稳。练习前先放松肩膀。'

@@ -248,12 +248,12 @@ export default function LearningView({ plan, sourceFiles, initialProgress, initi
                 </ol>
               </>
             ) : id === 'sources' ? (
-              openPanel === id && <SourcesPanel sources={sources} files={sourceFiles} relatedTasks={relatedTasks} selectedId={selectedSourceId} error={sourceError} onOpen={openSource} imageUnavailableMessage={imageUnavailableMessage} />
+              openPanel === id && <SourcesPanel sources={sources} files={sourceFiles} relatedTasks={relatedTasks} selectedId={selectedSourceId} error={sourceError} onOpen={openSource} mock={plan.mode === 'mock'} imageUnavailableMessage={imageUnavailableMessage} />
             ) : <ChatPanel key={task?.id ?? 'no-task'} task={task} canAsk={Boolean(task && task.id === currentTaskId)} messages={messages} pendingTaskId={pendingTaskId} sources={sources} onSend={sendQuestion} onOpenSource={openSource} visible={openPanel === id} />}
           </div>
         ))}
       </aside>
-      {sourcePreview && <SourceDialog selection={sourcePreview} file={sourceFiles?.get(sourcePreview.source.sourceId)} onDismiss={dismissSource} imageUnavailableMessage={imageUnavailableMessage} />}
+      {sourcePreview && <SourceDialog selection={sourcePreview} file={sourceFiles?.get(sourcePreview.source.sourceId)} onDismiss={dismissSource} mock={plan.mode === 'mock'} imageUnavailableMessage={imageUnavailableMessage} />}
     </div>
   )
 }

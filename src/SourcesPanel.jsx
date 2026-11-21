@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import SourceImage from './SourceImage.jsx'
 import { sourceText } from './learningSources.js'
 
-export default function SourcesPanel({ sources, files, relatedTasks, selectedId, error, onOpen, imageUnavailableMessage = '原图当前不可用。' }) {
+export default function SourcesPanel({ sources, files, relatedTasks, selectedId, error, onOpen, mock = false, imageUnavailableMessage = '原图当前不可用。' }) {
   const list = useRef(null)
   const selectedRow = useRef(null)
 
@@ -37,7 +37,7 @@ export default function SourcesPanel({ sources, files, relatedTasks, selectedId,
                   <span className="block font-semibold text-ink">{source.title}</span>
                   <span className="block text-xs">{isImage ? '图片' : '文字'} · {source.status === 'processed' ? '处理成功' : '处理失败'}</span>
                   {isImage && !file && <span className="block text-xs">{imageUnavailableMessage}</span>}
-                  {summary && <span className="block text-xs">{isImage && '模拟提取内容 · '}{summary}</span>}
+                  {summary && <span className="block text-xs">{isImage && (mock ? '模拟提取内容 · ' : 'AI 提取内容 · ')}{summary}</span>}
                   {source.error && <span className="block text-xs text-error">{source.error}</span>}
                   <span className="block text-xs">{tasks.length ? `关联任务 · ${tasks.map(({ title }) => title).join('、')}` : '无关联任务'}</span>
                 </span>

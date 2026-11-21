@@ -1,4 +1,4 @@
-import { planLearning, readSources } from './services/analysisService.js'
+import * as analysisService from './services/analysisService.js'
 
 export function createAnalysisBatch(materials) {
   let textNumber = 0
@@ -14,8 +14,8 @@ export function createAnalysisBatch(materials) {
   })
 }
 
-export async function continueAnalysis({ sources, confirmPartial, clarification }, onStage) {
-  const result = await planLearning({ sources, confirmPartial, clarification, onStage })
+export async function continueAnalysis({ sources, confirmPartial, clarification }, onStage, service = analysisService) {
+  const result = await service.planLearning({ sources, confirmPartial, clarification, onStage })
 
   if (result.status === 'needsClarification') {
     return { phase: 'clarification', result, sources, confirmPartial }
@@ -24,12 +24,12 @@ export async function continueAnalysis({ sources, confirmPartial, clarification 
   return { phase: result.status === 'ready' ? 'learning' : 'unavailable', result }
 }
 
-export async function startAnalysis(sources, onStage) {
+export async function startAnalysis(sources, onStage, service = analysisService) {
   await onStage('reading')
-  const result = await readSources({ sources })
+  const result = await service.readSources({ sources })
 
   if (result.status !== 'ready') return { phase: 'unavailable', result }
   if (result.requiresConfirmation) return { phase: 'confirmation', result }
 
-  return continueAnalysis({ sources: result.sources }, onStage)
+  return continueAnalysis({ sources: result.sources }, onStage, service)
 }

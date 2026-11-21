@@ -160,7 +160,7 @@ export default function App() {
           {!showEmptyNotice && <span className="ml-2" aria-hidden="true">→</span>}
         </button>
         <p id="start-help" role="status" className="mt-3 empty:mt-0 text-sm leading-relaxed text-muted">
-          {isImporting ? '图片检查完成后即可开始。' : ''}
+          {isImporting ? '图片检查完成后即可开始。' : materials.length ? '开始后，资料将发送给 DeepSeek 进行识别和规划。' : ''}
         </p>
       </div>
     </>

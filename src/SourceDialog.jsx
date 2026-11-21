@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import SourceImage from './SourceImage.jsx'
 import { sourceText } from './learningSources.js'
 
-export default function SourceDialog({ selection, file, onDismiss, imageUnavailableMessage = '原图当前不可用。' }) {
+export default function SourceDialog({ selection, file, onDismiss, mock = false, imageUnavailableMessage = '原图当前不可用。' }) {
   const dialog = useRef(null)
   const content = useRef(null)
   const highlight = useRef(null)
@@ -44,7 +44,7 @@ export default function SourceDialog({ selection, file, onDismiss, imageUnavaila
           )}
           {text ? (
             <section>
-              <h3 className="mb-2 text-sm font-semibold">{isImage ? '模拟提取内容' : '原文'}</h3>
+              <h3 className="mb-2 text-sm font-semibold">{isImage ? (mock ? '模拟提取内容' : 'AI 提取文字与图示解读') : '原文'}</h3>
               <p className="leading-relaxed whitespace-pre-wrap wrap-anywhere">
                 {range ? (
                   <>

@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/analysis.js": {
+      "includeFiles": "server/prompts/analysis.*.md",
+      "maxDuration": 45
+    }
+  }
+}
