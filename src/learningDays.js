@@ -30,6 +30,7 @@ function taskRecords(days) {
   const records = new Map()
   for (const day of days) {
     for (const instance of day.instances) {
+      if (instance.held) continue
       const record = { ...records.get(instance.task.id) }
       if (!instance.optional || instance.startedAt !== null) record.offeredDay = day.dayNumber
       if (instance.startedAt !== null) record.lastPracticedAt = instance.completedAt ?? instance.startedAt
@@ -66,16 +67,22 @@ function eligibleTasks(plan, records, dayNumber, now, schedule) {
 }
 
 function assignInstances(day, tasks, optional) {
-  let minutes = day.instances.reduce((sum, item) => sum + item.task.estimatedMinutes, 0)
+  const scheduled = day.instances.filter((item) => !item.held)
+  let count = scheduled.length
+  let minutes = scheduled.reduce((sum, item) => sum + item.task.estimatedMinutes, 0)
   const instances = [...day.instances]
   for (const task of tasks) {
-    if (instances.length >= day.limits.tasks) break
-    if (minutes + task.estimatedMinutes > day.limits.minutes || instances.some((item) => item.task.id === task.id)) continue
-    instances.push({ id: `${day.id}:${task.id}`, task: snapshotDailyTask(task), optional: optional || Boolean(task.auxiliary),
-      status: 'notStarted', startedAt: null, completedAt: null, feedback: [] })
+    if (count >= day.limits.tasks) break
+    const index = instances.findIndex((item) => item.task.id === task.id)
+    if (minutes + task.estimatedMinutes > day.limits.minutes || (index >= 0 && !instances[index].held)) continue
+    const instance = { id: `${day.id}:${task.id}`, task: snapshotDailyTask(task), optional: optional || Boolean(task.auxiliary),
+      status: 'notStarted', startedAt: null, completedAt: null, feedback: [] }
+    if (index < 0) instances.push(instance)
+    else instances[index] = instance
+    count++
     minutes += task.estimatedMinutes
   }
-  return instances.length === day.instances.length ? day : { ...day, instances }
+  return count === scheduled.length ? day : { ...day, instances }
 }
 
 function openDay(session, startedAt) {
@@ -107,6 +114,18 @@ export function getOneTimeProgress(days) {
     .map(({ task }) => task.id)))
 }
 
+export function currentDayInstances(session) {
+  const day = session.days.at(-1)
+  const tasks = new Map(activeLearningPlan(session).tasks.map((task) => [task.id, task]))
+  const records = taskRecords(session.days)
+  const schedule = new Map((session.agent?.schedule ?? []).map((item) => [item.taskId, item]))
+  return day.instances.filter((item) => {
+    if (item.status !== 'notStarted') return true
+    const task = tasks.get(item.task.id)
+    return !item.held && task && (schedule.get(task.id)?.notBefore ?? 0) <= day.dayNumber && prerequisitesMet(task, records)
+  })
+}
+
 export function reviseOpenLearningDay(session, affectedIds, now, startedTaskId) {
   const day = session.days.at(-1)
   const history = session.days.slice(0, -1)
@@ -116,15 +135,27 @@ export function reviseOpenLearningDay(session, affectedIds, now, startedTaskId) 
   const valid = (task) => task && (schedule.get(task.id)?.notBefore ?? 0) <= day.dayNumber && prerequisitesMet(task, records)
   const hasQuestions = (item) => session.messages.some(({ instanceId }) => instanceId === item.id)
   const replace = day.instances.filter((item) => affectedIds.has(item.task.id) && item.startedAt === null && !hasQuestions(item))
-  let minutes = day.instances.reduce((sum, { task }) => sum + task.estimatedMinutes, 0)
-  const kept = day.instances.filter((item) => !replace.includes(item)).map((item) => {
+  const remaining = day.instances.filter((item) => !replace.includes(item))
+  const scheduled = remaining.filter((item) => !item.held)
+  let minutes = scheduled.reduce((sum, { task }) => sum + task.estimatedMinutes, 0)
+  let count = scheduled.length
+  const kept = remaining.map((item) => {
     const canRevise = item.status === 'notStarted' && affectedIds.has(item.task.id) ||
       item.task.id === startedTaskId && item.status === 'inProgress' && !hasQuestions(item)
     if (!canRevise) return item
     const task = plan.tasks.find(({ id }) => id === item.task.id)
-    if (!valid(task) || minutes - item.task.estimatedMinutes + task.estimatedMinutes > day.limits.minutes) return item
-    minutes += task.estimatedMinutes - item.task.estimatedMinutes
-    return { ...item, task: snapshotDailyTask(task) }
+    const previousMinutes = item.held ? 0 : item.task.estimatedMinutes
+    if (!valid(task)) {
+      if (item.status !== 'notStarted' || item.held) return item
+      minutes -= previousMinutes
+      count--
+      return { ...item, held: true }
+    }
+    if ((item.held && count >= day.limits.tasks) || minutes - previousMinutes + task.estimatedMinutes > day.limits.minutes) return item
+    if (item.held) count++
+    minutes += task.estimatedMinutes - previousMinutes
+    const { held, ...active } = item
+    return { ...active, task: snapshotDailyTask(task), optional: Boolean(held || active.optional || task.auxiliary) }
   })
   let next = { ...day, instances: kept }
   for (const item of replace) {
@@ -153,6 +184,7 @@ export function updateLearningDay(session, action) {
 
   const item = current.instances.find(({ id }) => id === action.instanceId)
   if (!item || (action.type === 'start' ? item.status !== 'notStarted' : action.type !== 'complete' || item.status !== 'inProgress')) return session
+  if (action.type === 'start' && !currentDayInstances(session).includes(item)) return session
   const plan = activeLearningPlan(session)
   const criteria = [...feedbackCriteria(plan, item.task.id), item.task.selfCheck].filter(Boolean)
   const updated = action.type === 'start' ? { ...item, status: 'inProgress', startedAt: now } : {

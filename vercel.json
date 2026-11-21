@@ -4,6 +4,9 @@
       "includeFiles": "server/prompts/analysis.*.md",
       "maxDuration": 45
     },
+    "api/chat.js": {
+      "includeFiles": "server/prompts/tutor.*.md"
+    },
     "api/learning-agent.js": {
       "includeFiles": "server/prompts/learning-agent.system.md",
       "maxDuration": 15

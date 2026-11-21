@@ -224,6 +224,31 @@ test('V2 字段、频率来源和明确解锁门槛通过双端校验', async ()
   }
 })
 
+test('明确的下次练习间隔不被当成复核或学习日，独立核验前修正时间用途', async () => {
+  const interval = '两次练习至少相隔48小时再做下一次排线练习。'
+  const imported = { ...source, text: note + interval }
+  const elapsed = { unit: 'elapsedMinutes', interval: 2880, basis: 'source', sourceRefs: refs(interval) }
+  const practiceProposal = asV2(recurring, { type: 'recurring', sourceRefs: [...recurring.sourceRefs, ...refs(interval)],
+    practice: { ...practice, reviewAfter: elapsed } })
+  const { service, calls } = setup({
+    plan: ({ planVersion }) => {
+      assert.equal(planVersion, 2)
+      return success(proposal([practiceProposal]))
+    },
+    review: ({ tasks }) => {
+      assert.equal(tasks.length, 1)
+      assert.deepEqual(tasks[0].practice.frequency, elapsed)
+      assert.deepEqual(tasks[0].practice.reviewAfter, { unit: 'learningDay', interval: 3, basis: 'recommendation' })
+      return success({ verdicts: [{ id: tasks[0].id, verdict: 'supported' }] })
+    },
+  })
+  const result = await service.planLearning({ sources: [imported], planVersion: 2 })
+  assert.equal(result.status, 'ready')
+  assert.equal(result.tasks[0].type, 'recurring')
+  assert.equal(result.tasks[0].practice.frequency.interval, 2880)
+  assert.equal(calls.length, 3)
+})
+
 test('V2 移除循环、无效前置、伪造周期引用和未通过独立核验的任务及依赖', async () => {
   const { service, calls } = setup({
     plan: () => success(proposal([

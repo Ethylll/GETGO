@@ -71,7 +71,8 @@ function describeTask(task) {
 function describeInstance(item) {
   return { evidenceId: `instance:${item.id}`, id: item.id, taskId: item.task.id, title: field(item.task.title, 120),
     type: item.task.type, optional: item.optional, status: item.status, startedAt: item.startedAt,
-    completedAt: item.completedAt, selfChecks: item.feedback.slice(0, 4).map((value) => field(value, 120)) }
+    completedAt: item.completedAt, ...(item.held ? { held: true } : {}),
+    selfChecks: item.feedback.slice(0, 4).map((value) => field(value, 120)) }
 }
 
 function describeAdjustments(adjustments, days, knownTasks, turns) {
@@ -130,14 +131,15 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
     if (!sources.has(key)) sources.set(key, { evidenceId: `source:${key}`, sourceId, title: field(source.title, 120), excerpt: clipped })
   }
   const recentDays = session.days.slice(-DAY_LIMIT).map((day) => ({
-    id: day.id, dayNumber: day.dayNumber, startedAt: day.startedAt, endedAt: day.endedAt, instanceCount: day.instances.length,
+    id: day.id, dayNumber: day.dayNumber, startedAt: day.startedAt, endedAt: day.endedAt,
+    instanceCount: day.instances.filter(({ held }) => !held).length,
     instances: day.instances.slice(0, 8).map(describeInstance),
   }))
   const oneTime = getOneTimeProgress(session.days)
   const summaries = selectedTasks.map((id) => {
     const records = instances.filter(({ task }) => task.id === id)
-    const previous = records.filter(({ id: instanceId, optional, startedAt }) =>
-      !instanceId.startsWith(`${current.id}:`) && (!optional || startedAt !== null))
+    const previous = records.filter(({ id: instanceId, optional, startedAt, held }) =>
+      !held && !instanceId.startsWith(`${current.id}:`) && (!optional || startedAt !== null))
     const missed = previous.findLastIndex(({ status }) => status === 'completed')
     return { taskId: id, completedInstances: records.filter(({ status }) => status === 'completed').length,
       consecutiveUnfinishedOffers: previous.slice(missed + 1).length,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { resolveAgentChange } from '../src/agentActions.js'
 import { applyPlanDelta } from '../src/agentPlanChanges.js'
-import { activeLearningPlan, createDailySession, getOneTimeProgress, updateLearningDay } from '../src/learningDays.js'
+import { activeLearningPlan, createDailySession, currentDayInstances, getOneTimeProgress, updateLearningDay } from '../src/learningDays.js'
 import { AGENT_BUDGET, runLearningAgent } from '../src/learningAgent.js'
 import { saveWithLearningObservation } from '../src/learningObservation.js'
 import { LEARNING_SESSION_KEY, loadLearningSession, saveDailyLearningSession } from '../src/learningSessionStorage.js'
@@ -43,13 +43,13 @@ function fixture(plan = makePlan(), start = (session) => session, limits) {
     state = loadLearningSession(storage).session
     return result.event
   }
-  function feedback(id, text, taskId = 'practice') {
+  function feedback(id, text, taskId = 'practice', kind = 'difficulty') {
     const day = today(state)
     const turn = { id, projectId: state.projectId, taskId, instanceId: `${day.id}:${taskId}`, dayId: day.id, question: text,
       createdAt: at + 800, status: 'pending', answer: '', citations: [] }
     const before = { ...state, messages: [...state.messages, turn] }
     const after = { ...before, revision: before.revision + 2, messages: [...state.messages, {
-      ...turn, status: 'insufficient', feedback: { kind: 'difficulty', excerpt: text },
+      ...turn, status: 'insufficient', feedback: { kind, excerpt: text },
     }] }
     const result = saveWithLearningObservation(before, after, { type: 'chatReply', messageId: id }, (value) => saveDailyLearningSession(value, storage))
     state = loadLearningSession(storage).session
@@ -172,6 +172,34 @@ test('拆解要确认，子任务按顺序安排并保留原目标；撤销无�
   assert.deepEqual(state.days[0], originalDays[0])
 })
 
+test('带问答的旧实例保留只读记录，确认新增前置后仍须完成两步才能开始原任务', async () => {
+  const plan = makePlan([makeTask('first'), makeTask('reflection', { prerequisiteTaskIds: ['first'] })])
+  const store = fixture(plan, undefined, { minutes: 6, tasks: 3 })
+  const event = store.nextDay()
+  store.commit((state) => ({ ...state, messages: [{
+    id: 'prior-question', projectId: state.projectId, dayId: 'day-2', instanceId: 'day-2:first', taskId: 'first',
+    question: '还需要先练什么？', status: 'insufficient', createdAt: at + 510, answer: '', citations: [],
+  }] }))
+  await simulate(store, event, ({ receipts }) => receipts.length ? stop()
+    : act('DECOMPOSE_TASK', 'first', { parts: [{ ...exercise, title: '准备姿势' }, exercise] }))
+  const proposal = store.read().agent.changes[0]
+  let state = store.commit((session) => resolveAgentChange(session, proposal.id, 'accept', at + 2_000))
+  const [part, second] = state.agent.changes[0].delta.tasks
+  assert.equal(today(state).instances.find(({ task }) => task.id === 'first').held, true)
+  assert.equal(state.messages[0].instanceId, 'day-2:first')
+  assert.deepEqual(currentDayInstances(state).map(({ task }) => task.id), [part.taskId])
+  assert.equal(progress(state, 'start', 'first', at + 2_001), state)
+  state = store.commit((session) => progress(progress(session, 'start', part.taskId), 'complete', part.taskId))
+  assert.ok(currentDayInstances(state).some(({ task }) => task.id === second.taskId))
+  assert.equal(progress(state, 'start', 'first', at + 2_001), state)
+  store.commit((session) => progress(progress(session, 'start', second.taskId), 'complete', second.taskId))
+  store.nextDay()
+  const after = store.read()
+  assert.ok(currentDayInstances(after).some(({ task }) => task.id === 'first'))
+  assert.equal(after.days[1].instances.find(({ task }) => task.id === 'first').status, 'notStarted')
+  assert.equal(after.messages[0].id, 'prior-question')
+})
+
 test('练习调整影响可执行步骤、难度和两类间隔；已开始任务需要用户确认', async () => {
   const store = fixture()
   const event = store.nextDay()
@@ -226,6 +254,66 @@ test('用户反馈后可调整尚未开始的今日实例，原问答和变更�
   assert.equal(snapshot.agent.changes[0].delta.tasks[0].before.estimatedMinutes, 6)
   assert.equal(snapshot.messages[0].instanceId, instance.id)
   assert.equal(snapshot.messages[0].question, '这项练习今天还没有开始，我只有三分钟')
+})
+
+test('连续困难的多日观察可以促成实际调整，再依据真实练习和用户反馈观察其效果', async () => {
+  const store = fixture()
+  store.feedback('difficulty-one', '我分不清节奏是否均匀')
+  store.nextDay()
+  store.feedback('difficulty-two', '我还是听不明白哪一下偏快')
+  store.nextDay()
+  const event = store.feedback('difficulty-three', '完整练习对我太难了，想先练一小段')
+  const run = await simulate(store, event, ({ frame, receipts }) => {
+    if (receipts.length) return stop('wait')
+    assert.equal(frame.summaries.find(({ taskId }) => taskId === 'practice').consecutiveUnfinishedOffers, 2)
+    assert.ok(frame.messages.some(({ evidenceId }) => evidenceId === 'message:difficulty-one'))
+    assert.ok(frame.messages.some(({ evidenceId }) => evidenceId === 'message:difficulty-three'))
+    return act('ADJUST_PRACTICE', 'practice', { minutes: 3 }, { evidenceIds: ['message:difficulty-three'] })
+  })
+  assert.equal(run.round.steps[0].receipt.status, 'applied')
+  store.commit((state) => progress(progress(state, 'start', 'practice', at + 4_000), 'complete', 'practice', at + 4_001))
+  const next = store.nextDay()
+  const followed = await simulate(store, next, ({ frame }) => {
+    assert.equal(frame.adjustments[0].waitingForPractice, false)
+    assert.equal(frame.adjustments[0].subsequentPractice[0].status, 'completed')
+    assert.equal(frame.adjustments[0].subsequentPractice[0].id, 'day-3:practice')
+    return stop('wait')
+  })
+  assert.equal(followed.outcome, 'waiting')
+})
+
+test('重复完成和自述熟练只作为证据，模型可提供独立选学自检', async () => {
+  const store = fixture()
+  store.commit((state) => progress(progress(state, 'start', 'practice'), 'complete', 'practice'))
+  store.nextDay()
+  store.commit((state) => progress(progress(state, 'start', 'practice'), 'complete', 'practice'))
+  store.nextDay()
+  const event = store.feedback('self-report', '现在觉得交替敲击已经熟练了', 'practice', 'selfAssessment')
+  const run = await simulate(store, event, ({ frame, receipts }) => {
+    if (receipts.length) return stop()
+    assert.equal(frame.summaries.find(({ taskId }) => taskId === 'practice').completedInstances, 2)
+    assert.equal(frame.messages.find(({ evidenceId }) => evidenceId === 'message:self-report').feedback.kind, 'selfAssessment')
+    return act('CHECK_MASTERY', 'practice', exercise, { evidenceIds: ['message:self-report'] })
+  })
+  const assignment = currentDayInstances(store.read()).find((item) => item.task.id === run.round.steps[0].receipt.changeId)
+  assert.ok(assignment.optional && assignment.task.selfCheck)
+  assert.equal(assignment.status, 'notStarted')
+  assert.equal(getOneTimeProgress(store.read().days).size, 0)
+})
+
+test('拆解已生效且尚未实践时，同一困难不会重复改变任务', async () => {
+  const store = fixture()
+  const parts = [{ ...exercise, title: '准备姿势' }, exercise]
+  await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop('wait') : act('DECOMPOSE_TASK', 'first', { parts }))
+  const change = store.read().agent.changes[0]
+  store.commit((state) => resolveAgentChange(state, change.id, 'accept', at + 4_000))
+  const next = store.nextDay()
+  const result = await simulate(store, next, ({ frame, receipts }) => {
+    assert.equal(frame.adjustments[0].waitingForPractice, true)
+    return receipts.length ? stop('wait') : act('DECOMPOSE_TASK', 'first', { parts })
+  })
+  assert.equal(result.round.steps[0].receipt.code, 'awaiting_practice')
+  assert.equal(store.read().agent.changes.length, 1)
 })
 
 test('新困难例外必须有调整后原话，既有困难不能凭模型标签覆盖保护', async () => {

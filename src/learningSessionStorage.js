@@ -124,7 +124,8 @@ function validInstance(item, day, evidence) {
     !Array.isArray(task.steps) || task.steps.length < 2 || task.steps.length > 5 || !hasValidSourceRefs(task.sourceRefs, evidence) ||
     !task.steps.every((step) => typeof step?.text === 'string' && step.text.trim() && hasValidSourceRefs(step.sourceRefs, evidence)) ||
     !isValidV2Task(task, task.prerequisiteTaskIds.filter((id) => task.prerequisiteGates?.some((gate) => gate?.taskId === id)), evidence) ||
-    typeof item.optional !== 'boolean' || !isStringList(item.feedback)) return false
+    typeof item.optional !== 'boolean' || !isStringList(item.feedback) ||
+    (item.held !== undefined && (item.held !== true || item.status !== 'notStarted'))) return false
   const withinDay = (time) => Number.isFinite(time) && time >= day.startedAt && (day.endedAt === null || time <= day.endedAt)
   if (item.status === 'notStarted') return item.startedAt === null && item.completedAt === null && !item.feedback.length
   if (!withinDay(item.startedAt)) return false
@@ -143,10 +144,12 @@ function validDailySession(session) {
     if (day?.id !== `day-${index + 1}` || day.dayNumber !== index + 1 || !Number.isFinite(day.startedAt) || day.startedAt < 0 ||
       (index > 0 && day.startedAt !== days[index - 1].endedAt) ||
       (index === days.length - 1 ? day.endedAt !== null : !Number.isFinite(day.endedAt) || day.endedAt < day.startedAt) ||
-      !validLimits(day.limits) || !Array.isArray(day.instances) || day.instances.length > day.limits.tasks ||
+      !validLimits(day.limits) || !Array.isArray(day.instances) ||
       !day.instances.every((item) => validInstance(item, day, evidence))) return false
+    const scheduled = day.instances.filter((item) => !item.held)
     return new Set(day.instances.map(({ id }) => id)).size === day.instances.length &&
-      day.instances.reduce((sum, { task }) => sum + task.estimatedMinutes, 0) <= day.limits.minutes
+      scheduled.length <= day.limits.tasks &&
+      scheduled.reduce((sum, { task }) => sum + task.estimatedMinutes, 0) <= day.limits.minutes
   })
 }
 
@@ -161,8 +164,9 @@ export function saveDailyLearningSession(session, storage) {
     const snapshot = { version: 2, projectId, revision, limits, plan, effectivePlan: effective && { ...effective, sources: undefined },
       days: days.map(({ id, dayNumber, startedAt, endedAt, limits: dayLimits, instances }) => ({
         id, dayNumber, startedAt, endedAt, limits: dayLimits,
-        instances: instances.map(({ id: instanceId, task, status, startedAt: start, completedAt, optional, feedback }) => ({
+        instances: instances.map(({ id: instanceId, task, status, startedAt: start, completedAt, optional, feedback, held }) => ({
           id: instanceId, task: snapshotDailyTask(task), status, startedAt: start, completedAt, optional, feedback,
+          ...(held ? { held: true } : {}),
         })),
       })),
       messages, observations: storedObservations(session.observations, new Set(days.map(({ id }) => id)), messages),

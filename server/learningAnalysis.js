@@ -148,15 +148,28 @@ function evidenceFor(sources) {
     ({ sourceId, title, type, text: type === 'text' ? text : extractedText }))
 }
 
+function practiceIntervalRefs(refs, evidenceById) {
+  return (Array.isArray(refs) ? refs : []).filter((ref) => hasValidSourceRefs([ref], evidenceById) &&
+    /下[一两]次[^。；]{0,12}练习|再[^。；]{0,12}练习|两次[^。；]{0,12}练习|每次练习|重复一次/u.test(ref.excerpt) &&
+    !/复核|复查|复盘|回顾|评估/u.test(ref.excerpt) && explicitElapsedMinutes([ref]).length > 0)
+}
+
 function initializeV2Task(proposal, evidenceById) {
   const task = { ...proposal, status: 'notStarted' }
   const frequency = task.practice?.frequency
-  if (task.type === 'recurring' && frequency?.basis === 'source' && hasValidSourceRefs(frequency.sourceRefs, evidenceById)) {
-    const intervals = new Set(explicitElapsedMinutes(frequency.sourceRefs))
-    if (intervals.size === 1) {
-      const [interval] = intervals
-      task.practice = { ...task.practice, frequency: { ...frequency, unit: 'elapsedMinutes', interval } }
-    }
+  if (task.type !== 'recurring' || !frequency) return task
+  const directFrequency = frequency.basis === 'source' && hasValidSourceRefs(frequency.sourceRefs, evidenceById)
+    ? frequency.sourceRefs
+    : frequency.basis === 'recommendation' ? practiceIntervalRefs(task.sourceRefs, evidenceById) : []
+  const intervals = new Set(explicitElapsedMinutes(directFrequency))
+  if (intervals.size !== 1) return task
+  const [interval] = intervals
+  task.practice = { ...task.practice, frequency: { unit: 'elapsedMinutes', interval, basis: 'source', sourceRefs: directFrequency } }
+  const review = task.practice.reviewAfter
+  if (review?.basis === 'source' && hasValidSourceRefs(review.sourceRefs, evidenceById) &&
+    practiceIntervalRefs(review.sourceRefs, evidenceById).length === review.sourceRefs.length &&
+    explicitElapsedMinutes(review.sourceRefs).every((minutes) => minutes === interval)) {
+    task.practice.reviewAfter = { unit: 'learningDay', interval: 3, basis: 'recommendation' }
   }
   return task
 }

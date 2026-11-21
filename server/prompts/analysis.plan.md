@@ -14,13 +14,15 @@
 
 ## V2 任务协议
 
-本节为规划 Prompt v2.0。上面的示例只说明共用字段，遇到 planVersion 2 时还必须提供下面的新字段。
+本节为规划 Prompt v2.1。上面的示例只说明共用字段，遇到 planVersion 2 时还必须提供下面的新字段。
 
 在上述输出的每项任务内增加 type（oneTime 或 recurring）、estimatedMinutes（1 至 dailyLimits.minutes 的整数）、completionCriteria（当次可观察结果）及 prerequisiteGates 数组。时长是教学估算，不需填满每日配额；一项任务应能在一日内执行。程序另行填写初始状态。适合反复训练的实践任务用 recurring；准备、理解过程或单次操作用 oneTime。不要求路线中一定有周期任务，也不把单次完成或累计次数当作技能掌握。有实际可并行内容时，不将周期练习设为后续新知的默认前置。
 
 每项 recurring 增加 practice，例如 {"startCondition":"immediate","frequency":{"unit":"learningDay","interval":1,"basis":"recommendation"},"reviewAfter":{"unit":"learningDay","interval":3,"basis":"recommendation"},"longTermGoal":"持续练习目标","reviewCriteria":{"stop":"何时考虑停止","reduce":"何时考虑减量","adjust":"何时考虑调整"}}。有前置依赖时 startCondition 使用 afterPrerequisites。oneTime 不输出 practice。复核节点提示检查实际反馈，不自动结业、加量或降低标准。
 
 frequency 和 reviewAfter 各自独立。frequency 描述下一次练习的间隔，reviewAfter 描述何时复核，练习间隔不能冒充复核节点。各字段默认用 learningDay。原文明确要求自然时间间隔时，该字段必须用 elapsedMinutes，例如「相隔48小时」用 2880，不能改写为 2 个学习日。设置 basis 为 source，并写入匹配语义的逐字 sourceRefs。资料未提供安排时用 recommendation，省去该时间字段的 sourceRefs。任务事实和动作仍各有原文引用。
+
+若原文明确「持续重复」且下一次练习至少相隔自然时间，把它作为一项 recurring；本次先执行并完成一轮也是同一练习。除非另有实际的准备动作或前置门槛，不要再生成内容相同的 oneTime 当作入门。例：「每次画一组平行线，随后检查方向；至少相隔48小时再练」生成画线和检查组成的周期练习，两步引用各自原文，frequency 引用 48 小时句子，未提复核则 reviewAfter 使用学习日建议。已经由程序调度的间隔无需编入第一次练习操作。repairEvidence 重试也要保留能独立核验的周期安排及其精确引用。
 
 prerequisiteGates 只列 prerequisiteTaskIds 中真正属于 recurring 的前置任务，每个前置任务一项。等到一次可观察的练习入门任务达成其单次完成标准时，可用 {"taskId":"前置练习ID","kind":"practiceCompletion"}。确实需要可观察自检反馈时，用 {"taskId":"前置练习ID","kind":"selfCheckFeedback","criterion":"具体验收条件"}。没有这类明确必要门槛时，不把周期练习列为前置，数组返回 []。不使用累计练习量或模型推定的掌握状态当作门槛。
 
