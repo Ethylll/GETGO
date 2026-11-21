@@ -53,6 +53,7 @@ export function useLearningTools(plan) {
   const [sourceError, setSourceError] = useState('')
   const routeButton = useRef(null)
   const sourcesButton = useRef(null)
+  const qaButton = useRef(null)
   const sourceTrigger = useRef(null)
   const sources = new Map((plan.sources ?? []).map((source) => [source.sourceId, source]))
 
@@ -81,11 +82,17 @@ export function useLearningTools(plan) {
     })
   }
 
-  return { openPanel, setOpenPanel, selectedSourceId, sourcePreview, sourceError, routeButton, sourcesButton, sources, openSource, dismissSource }
+  function openChat() {
+    setOpenPanel('qa')
+    requestAnimationFrame(() => qaButton.current?.focus())
+  }
+
+  return { openPanel, setOpenPanel, selectedSourceId, sourcePreview, sourceError, routeButton, sourcesButton, qaButton, sources, openSource, dismissSource, openChat }
 }
 
 export default function LearningTools({ tools, plan, sourceFiles, isRestored, route, chat }) {
-  const { openPanel, setOpenPanel, selectedSourceId, sourcePreview, sourceError, routeButton, sourcesButton, sources, openSource, dismissSource } = tools
+  const { openPanel, setOpenPanel, selectedSourceId, sourcePreview, sourceError, routeButton, sourcesButton, qaButton, sources, openSource, dismissSource } = tools
+  const panelButtons = { route: routeButton, sources: sourcesButton, qa: qaButton }
   const relatedTasks = relatedTasksBySource(plan.tasks)
   const imageUnavailableMessage = isRestored ? '原图暂时无法恢复。' : '原图当前不可用。'
   return (
@@ -93,7 +100,7 @@ export default function LearningTools({ tools, plan, sourceFiles, isRestored, ro
       <aside className="relative z-10 order-first min-w-0" aria-label="学习工具">
         <div className="flex w-fit gap-1 rounded-2xl border border-line bg-paper p-1 md:flex-col">
           {panels.map(({ id, label, icon }) => (
-            <button key={id} id={`panel-button-${id}`} ref={id === 'route' ? routeButton : id === 'sources' ? sourcesButton : undefined} type="button" aria-label={label} title={label} aria-expanded={openPanel === id} aria-controls={`panel-${id}`} className="grid size-11 place-items-center rounded-xl text-accent hover:bg-oat aria-expanded:bg-oat" onClick={() => setOpenPanel(openPanel === id ? null : id)}>
+            <button key={id} id={`panel-button-${id}`} ref={panelButtons[id]} type="button" aria-label={label} title={label} aria-expanded={openPanel === id} aria-controls={`panel-${id}`} className="grid size-11 place-items-center rounded-xl text-accent hover:bg-oat aria-expanded:bg-oat" onClick={() => setOpenPanel(openPanel === id ? null : id)}>
               <svg aria-hidden="true" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                 <path d={icon} />
               </svg>

@@ -1,4 +1,5 @@
-import { EMPTY_AGENT_STATE, normalizeAgentDecision, prepareAgentAction } from './agentActions.js'
+import { AGENT_ACTIONS, EMPTY_AGENT_STATE, normalizeAgentDecision, prepareAgentAction } from './agentActions.js'
+import { shortText, validStoredPlanDelta } from './agentPlanChanges.js'
 import { activeLearningPlan } from './learningDays.js'
 import { buildLearningObservation } from './learningObservation.js'
 import { hasValidSourceRefs, indexSourceEvidence } from './services/validateLearningPlan.js'
@@ -23,12 +24,16 @@ export function restoredAgentState(value, session, now = Date.now()) {
   ])).values()] : []
   const evidence = indexSourceEvidence(session.plan.sources)
   const notes = Array.isArray(input.notes) ? input.notes.filter((note) => days.has(note?.dayId) &&
-    ['GUIDE', 'CLARIFY'].includes(note.type) && typeof note.id === 'string' && typeof note.text === 'string' &&
-    Number.isFinite(note.createdAt) && (note.type !== 'GUIDE' || hasValidSourceRefs(note.sourceRefs, evidence))) : []
+    ['GUIDE', 'CLARIFY'].includes(note.type) && shortText(note.id, 220) && shortText(note.text, 300) &&
+    (note.taskId === null || shortText(note.taskId, 180)) &&
+    Number.isFinite(note.createdAt) && (note.ignoredAt === undefined || Number.isFinite(note.ignoredAt)) &&
+    (note.instanceId == null || typeof note.taskId === 'string' && note.instanceId === `${note.dayId}:${note.taskId}`) &&
+    (note.type !== 'GUIDE' || hasValidSourceRefs(note.sourceRefs, evidence))) : []
   const changes = Array.isArray(input.changes) ? input.changes.filter((change) => days.has(change?.dayId) &&
-    typeof change.id === 'string' && ['pending', 'applied', 'rejected', 'undone'].includes(change.status) &&
-    Array.isArray(change.taskIds) && Array.isArray(change.delta?.tasks) && Array.isArray(change.delta?.schedule) &&
-    typeof change.action?.type === 'string') : []
+    shortText(change.id, 240) && shortText(change.reason, 220) && ['pending', 'applied', 'rejected', 'undone'].includes(change.status) &&
+    Number.isFinite(change.proposedAt) && (change.status !== 'applied' || Number.isFinite(change.appliedAt)) &&
+    Array.isArray(change.taskIds) && change.taskIds.every((id) => shortText(id, 180)) &&
+    [...AGENT_ACTIONS, 'RESTORE'].includes(change.action?.type) && validStoredPlanDelta(change.delta, evidence)) : []
   const schedule = Array.isArray(input.schedule) ? [...new Map(input.schedule.filter((item) => tasks.has(item?.taskId) &&
     [item.notBefore, item.priorityDay].every((number) => number === undefined || Number.isSafeInteger(number) && number > 0))
     .map((item) => [item.taskId, item])).values()] : []
@@ -58,7 +63,11 @@ function frameForRound(session, event) {
   const observation = buildLearningObservation(session, event, { adjustments: agent.changes.filter((change) => !change.revertedBy)
     .map((change) => ({ ...change, action: change.action.type })) })
   if (!observation) return null
-  return { ...observation, priorNotes: agent.notes.slice(-6).map(({ id, type, taskId, text, createdAt }) => ({
+  const reply = session.messages.find(({ id, clarificationId }) => id === event.messageId && clarificationId)
+  const prompt = reply && agent.notes.find(({ id }) => id === reply.clarificationId)
+  const notes = [...new Set([prompt, ...agent.notes.slice(-6)].filter(Boolean))].slice(0, 6)
+  return { ...observation, ...(prompt ? { clarification: { promptId: `note:${prompt.id}`, replyId: `message:${reply.id}` } } : {}),
+    priorNotes: notes.map(({ id, type, taskId, text, createdAt }) => ({
     evidenceId: `note:${id}`, type, taskId, text, createdAt,
   })), recentProposals: agent.changes.slice(-6).map(({ id, taskIds, status, action, reason }) => ({
     id, taskIds, status, action: action.type, reason,

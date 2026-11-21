@@ -1,5 +1,5 @@
 import { activeLearningPlan } from './learningDays.js'
-import { applyPlanDelta, equalAgentData, groundedStep, onlyKeys, planChangeFor, reversePlanDelta, shortText } from './agentPlanChanges.js'
+import { applyPlanDelta, canReversePlanDelta, equalAgentData, groundedStep, onlyKeys, planChangeFor, reversePlanDelta, shortText } from './agentPlanChanges.js'
 import { sourceText } from './learningSources.js'
 import { indexSourceEvidence } from './services/validateLearningPlan.js'
 
@@ -66,8 +66,9 @@ export function availableAgentEvidence(frame, receipts = []) {
 }
 
 function hasNewFeedback(frame, decision, taskId, after, kinds) {
-  return frame.messages.some((item) => decision.evidenceIds.includes(item.evidenceId) && item.feedback &&
-    (!kinds || kinds.includes(item.feedback.kind)) && (item.taskId === taskId || item.taskId === null) && item.createdAt > after)
+  return frame.messages.some((item) => decision.evidenceIds.includes(item.evidenceId) &&
+    (item.clarificationId || item.feedback && (!kinds || kinds.includes(item.feedback.kind))) &&
+    (item.taskId === taskId || item.taskId === null) && item.createdAt > after)
 }
 
 export function prepareAgentAction(session, frame, receipts, decision, actionId, now) {
@@ -100,8 +101,9 @@ export function prepareAgentAction(session, frame, receipts, decision, actionId,
     const alreadySaid = clarity && session.messages.some(({ question }) => normalization(question) === normalization(content.text))
     if (priorIsRelevant || alreadySaid || receipts.some((receipt) => receipt.taskId === (taskId ?? null) &&
       receipt.status === (clarity ? 'asked' : 'published'))) return { code: 'already_provided' }
+    const instanceId = session.days.at(-1).instances.find(({ task }) => task.id === taskId)?.id ?? null
     return { status: clarity ? 'asked' : 'published', waiting: clarity, note: { id: actionId, type,
-      dayId: frame.dayId, taskId: taskId ?? null, ...content, createdAt: now },
+      dayId: frame.dayId, taskId: taskId ?? null, instanceId, ...(target ? { taskTitle: target.title } : {}), ...content, createdAt: now },
     ...(clarity ? {} : { review: { ...content, target: { title: target.title, objective: target.objective } } }) }
   }
 
@@ -137,6 +139,31 @@ export function prepareAgentAction(session, frame, receipts, decision, actionId,
   return { code: 'unknown_action' }
 }
 
+function pendingChangeIsCurrent(session, change) {
+  if (session.days.at(-1).id !== change.dayId) return false
+  const fresh = planChangeFor(session, change.action, change.id)
+  return Boolean(fresh.delta && equalAgentData(fresh.delta, change.delta))
+}
+
+function changeHasLearningRecord(session, change) {
+  return session.days.some(({ instances }) => instances.some(({ task, startedAt, completedAt }) =>
+    change.taskIds.includes(task.id) && (startedAt !== null && startedAt >= change.appliedAt ||
+      completedAt !== null && completedAt >= change.appliedAt))) ||
+    session.messages.some(({ taskId, createdAt }) => change.taskIds.includes(taskId) && createdAt >= change.appliedAt)
+}
+
+export function agentChangeControls(session, change) {
+  if (change.status === 'pending') {
+    return pendingChangeIsCurrent(session, change)
+      ? { status: 'pending', commands: ['accept', 'reject'] }
+      : { status: 'expired', commands: [] }
+  }
+  if (change.status !== 'applied') return { status: change.status, commands: [] }
+  if (change.restores || change.revertedBy) return { status: 'restored', commands: [] }
+  if (!canReversePlanDelta(session, change.delta)) return { status: 'superseded', commands: [] }
+  return { status: 'applied', commands: [changeHasLearningRecord(session, change) ? 'restore' : 'undo'] }
+}
+
 export function resolveAgentChange(session, id, command, now) {
   const change = session.agent?.changes.find((item) => item.id === id)
   if (!change || !Number.isFinite(now)) return session
@@ -147,17 +174,13 @@ export function resolveAgentChange(session, id, command, now) {
   })
   if (change.status === 'pending') {
     if (command === 'reject') return replace({ status: 'rejected', resolvedAt: now })
-    if (command !== 'accept' || day.id !== change.dayId) return session
-    const fresh = planChangeFor(session, change.action, change.id)
-    if (!fresh.delta || !equalAgentData(fresh.delta, change.delta)) return session
+    if (command !== 'accept' || !pendingChangeIsCurrent(session, change)) return session
     const activePractice = change.action.type === 'ADJUST_PRACTICE' ? change.action.taskId : undefined
     const next = applyPlanDelta(session, change.delta, now, activePractice)
     return next ? replace({ status: 'applied', resolvedAt: now, appliedAt: now }, next) : session
   }
-  if (change.status !== 'applied' || change.revertedBy || !['undo', 'restore'].includes(command)) return session
-  const linked = session.days.some(({ instances }) => instances.some(({ task, startedAt, completedAt }) =>
-    change.taskIds.includes(task.id) && (startedAt >= change.appliedAt || completedAt >= change.appliedAt))) ||
-    session.messages.some(({ taskId, createdAt }) => change.taskIds.includes(taskId) && createdAt >= change.appliedAt)
+  if (change.status !== 'applied' || change.revertedBy || change.restores || !['undo', 'restore'].includes(command)) return session
+  const linked = changeHasLearningRecord(session, change)
   if (linked !== (command === 'restore')) return session
   const delta = reversePlanDelta(change.delta)
   const activePractice = change.action.type === 'ADJUST_PRACTICE' ? change.action.taskId : undefined

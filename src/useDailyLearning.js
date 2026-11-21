@@ -5,6 +5,7 @@ import { runLearningAgent } from './learningAgent.js'
 import { createDailySession, updateLearningDay } from './learningDays.js'
 import { saveWithLearningObservation } from './learningObservation.js'
 import { LEARNING_SESSION_KEY, loadLearningSession, saveDailyLearningSession } from './learningSessionStorage.js'
+import { respondToClarification } from './teachingInteractions.js'
 
 const writeLock = `${LEARNING_SESSION_KEY}.write`
 
@@ -91,9 +92,26 @@ export function useDailyLearning(plan, restored) {
     })
   }
 
-  function decideChange(id, command) {
-    return transact((state) => resolveAgentChange(state, id, command, Date.now()), { durable: true })
+  async function saveTeachingInteraction(update, trigger) {
+    let changed = false
+    const saved = await transact((state) => {
+      const updated = update(state)
+      changed = updated !== state
+      return updated
+    }, { trigger, durable: true })
+    return Boolean(saved && changed)
   }
 
-  return { session, storageStatus, dispatch, updateMessages, decideChange }
+  function decideChange(id, command) {
+    return saveTeachingInteraction((state) => resolveAgentChange(state, id, command, Date.now()))
+  }
+
+  function respondToPrompt(noteId, text) {
+    const messageId = text === undefined ? undefined : crypto.randomUUID()
+    return saveTeachingInteraction((state) => respondToClarification(state,
+      { noteId, messageId, text, now: Date.now(), projectId: session.projectId }),
+    messageId && { type: 'clarificationReply', messageId })
+  }
+
+  return { session, storageStatus, dispatch, updateMessages, decideChange, respondToPrompt }
 }

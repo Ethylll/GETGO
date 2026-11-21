@@ -24,6 +24,9 @@ export function storedObservations(events, dayIds, messages) {
     } else if (event.type === 'taskFeedback' && event.id === `taskFeedback:${event.messageId}` &&
       message?.instanceId && message.dayId === event.dayId && message.feedback) {
       result.set(event.id, { id: event.id, type: event.type, dayId: event.dayId, messageId: message.id })
+    } else if (event.type === 'clarificationReply' && message?.status === 'clarification' &&
+      event.id === `clarificationReply:${message.clarificationId}`) {
+      result.set(event.id, { id: event.id, type: event.type, dayId: event.dayId, messageId: message.id })
     }
   }
   return [...result.values()]
@@ -34,8 +37,12 @@ export function learningObservationEvent(before, next, trigger) {
   if (trigger.type === 'advance' && next !== before && day.id !== before.days.at(-1).id) {
     return { id: `nextDay:${day.id}`, type: 'nextDay', dayId: day.id }
   }
-  if (trigger.type !== 'chatReply') return null
   const turn = next.messages.find(({ id }) => id === trigger.messageId)
+  if (trigger.type === 'clarificationReply' && turn?.status === 'clarification' &&
+    !before.messages.some(({ clarificationId }) => clarificationId === turn.clarificationId)) {
+    return { id: `clarificationReply:${turn.clarificationId}`, type: trigger.type, dayId: day.id, messageId: turn.id }
+  }
+  if (trigger.type !== 'chatReply') return null
   const previous = before.messages.find(({ id }) => id === trigger.messageId)
   if (!turn?.instanceId || turn.dayId !== day.id || !validatedLearningFeedback(turn.question, turn.feedback) ||
     !['pending', 'interrupted'].includes(previous?.status) ||
@@ -143,9 +150,9 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
       oneTime: { completed: plan.tasks.filter(({ id, type }) => type === 'oneTime' && oneTime.has(id)).length,
         planned: plan.tasks.filter(({ type }) => type === 'oneTime').length } },
     recentDays, summaries, sources: [...sources.values()],
-    messages: selectedTurns.map(({ id, dayId, instanceId, taskId, question, answer, status, feedback, createdAt }) => ({
+    messages: selectedTurns.map(({ id, dayId, instanceId, taskId, question, answer, status, feedback, createdAt, clarificationId }) => ({
       evidenceId: `message:${id}`, dayId, instanceId, taskId, question: field(question, 320),
-      helpProvided: field(answer, 320), status, feedback, createdAt,
+      helpProvided: field(answer, 320), status, feedback, createdAt, ...(clarificationId ? { clarificationId } : {}),
     })),
     adjustments: describeAdjustments(adjustments, session.days, knownTasks, turns),
   }

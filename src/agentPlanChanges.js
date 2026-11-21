@@ -1,7 +1,13 @@
 import { activeLearningPlan, reviseOpenLearningDay, snapshotDailyTask } from './learningDays.js'
-import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan } from './services/validateLearningPlan.js'
+import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidV2Task } from './services/validateLearningPlan.js'
 
-export const equalAgentData = (left, right) => JSON.stringify(left) === JSON.stringify(right)
+function orderedAgentData(value) {
+  if (Array.isArray(value)) return value.map(orderedAgentData)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, orderedAgentData(value[key])]))
+}
+
+export const equalAgentData = (left, right) => JSON.stringify(orderedAgentData(left)) === JSON.stringify(orderedAgentData(right))
 export const shortText = (value, length) => typeof value === 'string' && value.trim().length > 0 && value.length <= length
 export const onlyKeys = (object, keys) => object && typeof object === 'object' && !Array.isArray(object) &&
   Object.keys(object).every((key) => keys.includes(key))
@@ -175,4 +181,30 @@ export function reversePlanDelta(delta) {
   const reverse = ({ before, after, ...rest }) => ({ ...rest, before: after, after: before })
   return { tasks: [...delta.tasks].reverse().map(reverse), schedule: delta.schedule.map(reverse),
     ...(delta.entry ? { entry: reverse(delta.entry) } : {}) }
+}
+
+export function canReversePlanDelta(session, delta) {
+  const plan = activeLearningPlan(session)
+  return (!delta.entry || delta.entry.after === plan.entryTaskId) &&
+    delta.tasks.every(({ taskId, after }) => equalAgentData(snapshot(plan.tasks.find(({ id }) => id === taskId)), after)) &&
+    delta.schedule.every(({ taskId, after }) =>
+      equalAgentData(session.agent.schedule.find((item) => item.taskId === taskId) ?? null, after))
+}
+
+export function validStoredPlanDelta(delta, evidence) {
+  if (!Array.isArray(delta?.tasks) || delta.tasks.length > 4 || !Array.isArray(delta.schedule) || delta.schedule.length > 1 ||
+    (!delta.tasks.length && !delta.schedule.length)) return false
+  const validTask = (task, id) => task === null || (task?.id === id && shortText(task.title, 300) && shortText(task.objective, 600) &&
+    Array.isArray(task.prerequisiteTaskIds) && task.prerequisiteTaskIds.every((item) => typeof item === 'string') &&
+    Array.isArray(task.knowledgePointIds) && Array.isArray(task.steps) && task.steps.length >= 2 && task.steps.length <= 5 &&
+    task.steps.every((step) => shortText(step?.text, 600) && hasValidSourceRefs(step.sourceRefs, evidence)) &&
+    hasValidSourceRefs(task.sourceRefs, evidence) && Array.isArray(task.prerequisiteGates) &&
+    isValidV2Task(task, task.prerequisiteTaskIds.filter((key) => task.prerequisiteGates.some((gate) => gate?.taskId === key)), evidence))
+  const validPlacement = (item, id) => item === null || (item?.taskId === id &&
+    [item.notBefore, item.priorityDay].every((day) => day === undefined || integer(day, 1, Number.MAX_SAFE_INTEGER)))
+  return delta.tasks.every((item) => shortText(item?.taskId, 180) && (item.before !== null || item.after !== null) &&
+    validTask(item.before, item.taskId) && validTask(item.after, item.taskId)) &&
+    delta.schedule.every((item) => shortText(item?.taskId, 180) && (item.before !== null || item.after !== null) &&
+      validPlacement(item.before, item.taskId) && validPlacement(item.after, item.taskId)) &&
+    (delta.entry === undefined || (shortText(delta.entry?.before, 180) && shortText(delta.entry.after, 180)))
 }

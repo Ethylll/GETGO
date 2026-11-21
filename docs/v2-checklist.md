@@ -32,7 +32,7 @@ P00 已审核，随阶段更新，来源为 [V2 原始规格](v2-spec.md)。阶�
 | V2-DAY-01 | §6.1、6.2、13.2 | 学习页默认今日任务，保留暖色风格及现有任务详情和引用。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 新计划落地 Day 1；今日为主视图，引用仍能打开原文。 | PASS | Edge 从真实图片导入直接进入 Day 1，步骤及答疑引用仍能打开并高亮原文片段。 |
 | V2-DAY-02 | §6.1 | 完整路线主动查看整体目标、当前阶段、完成的一次性任务、后续内容与持续练习。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 打开原侧栏依次核对五类信息，并回到今日焦点。 | PASS | Edge 默认收起，点击路线入口后显示整体目标、当前阶段、已完成一次性任务、后续内容和周期练习，可返回今日。 |
 | V2-DAY-03 | §6.2 | 展示主题、Day N、预计时长、完成进度及两类任务分组。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 混合日、只有一类、空日与已完成日均可用。 | PASS | 已确认 Q1（DEC-012）；Edge 验证混合日、仅一次性任务、必做完成与空日；learningDays.test.js 验证仅周期任务、预计时长及上限。 |
-| V2-DAY-04 | §6.2 | 当前任务详情、原文引用、答疑入口和下一日操作可用；存在教学调整时保留展示位。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 在桌面与手机打开各入口；调整内容由 V2-P05 联调。 | PARTIAL | Edge 验证任务详情、来源、已有任务的真实答疑与下日入口及 320px 布局。V2-P03 已在 Edge 验证空日项目答疑，教学调整信息待 V2-P05 联调。 |
+| V2-DAY-04 | §6.2 | 当前任务详情、原文引用、答疑入口和下一日操作可用；存在教学调整时保留展示位。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 在桌面与手机打开各入口；调整内容由 V2-P05 联调。 | PASS | P05 Edge 验证今日教学更新、有效任务列表、现有引用和答疑可并行使用；空学习日、主动推进及手机布局回归通过。 |
 | V2-DAY-05 | §6.3 | 调度纳入已满足启动条件且到期的周期练习。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 未启动、不应出现、应出现三类实例；同日去重。 | PASS | 已确认 Q1（DEC-012）；learningDays.test.js 区分未满足启动条件、Day 节律、真实 48 小时间隔及未到期；每项同日最多一个实例。 |
 | V2-DAY-06 | §6.3 | 按明确前置依赖纳入可做的一次性任务。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 未满足前置不会排入，独立任务仍可推进。 | PASS | 已确认 Q2（DEC-012）；learningDays.test.js 验证前置条件、自检及可独立执行的任务。 |
 | V2-DAY-07 | §6.3、6.6 | 保留仍需完成的一次性任务，仅在适合的学习日重排。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 跳过任务保持未完成，下个适合日出现，依赖不变。 | PASS | 已确认 Q1（DEC-012）；learningDays.test.js 保留未完成记录并在后续学习日重新排入，积压按最近安排顺序轮转。 |
@@ -64,7 +64,7 @@ P00 已审核，随阶段更新，来源为 [V2 原始规格](v2-spec.md)。阶�
 | V2-OBS-05 | §7.3、9.1 | 问答含项目 ID、学习日、可选任务 ID、问题、回答和时间。无当前任务时可基于项目资料提问。 | V2-P03 | `learningObservation.js`、`useDailyLearning.js`、`learningSessionStorage.js`、`useLearningChat.js`、`api/chat.js` | 发送、跨日响应和刷新仍归到最初项目、日期、任务或无任务。 | PASS | 已确认 Q4（DEC-013）；Edge 在空日发起项目答疑并刷新后回看，projectId/dayId 保留、taskId 为空；迟到任务答复保留原实例。真实项目问答验证有效引用。 |
 | V2-OBS-06 | §7.3、13.4 | 继承任务上下文问答和轻量 RAG，保留历史可查与引用验证。 | V2-P03 | `learningObservation.js`、`useDailyLearning.js`、`learningSessionStorage.js`、`useLearningChat.js`、`api/chat.js` | 直接问及追问能溯源，历史任务隔离，资料外拒答。 | PASS | chat.test.js 验证项目追问隔离旧任务上下文并保持引用核验；Edge 回看高亮来源，真实直接问题可溯源，资料外问题正常拒答。 |
 | V2-OBS-07 | §7.4、6.5 | 保存完成并且状态提交后提供下一学习日观察机会。 | V2-P03 | `learningObservation.js`、`useDailyLearning.js`、`learningSessionStorage.js`、`useLearningChat.js`、`api/chat.js` | 事件顺序为保存、推进与观察；失败不阻断下一日。 | PASS | learningObservation.test.js 验证旧日、发送中问答、新日和唯一观察索引整体写入后才释放事件；失写仍可进入下一日，无事件释放。 |
-| V2-OBS-08 | §7.4、8.4 | 纳入任务级和项目级新学习反馈、澄清回复；普通知识问答不触发即时观察。 | V2-P03 | `learningObservation.js`、`useDailyLearning.js`、`learningSessionStorage.js`、`useLearningChat.js`、`api/chat.js` | 学习反馈与澄清可观察，普通提问不重复调用；无任务场景按确认策略验收。 | PARTIAL | 已确认 Q4（DEC-013）；任务反馈可提供即时机会，项目反馈随下一次观察收集；资料不足也保留有效摘录。真实 Agent 澄清回复关联待 V2-P05。 |
+| V2-OBS-08 | §7.4、8.4 | 纳入任务级和项目级新学习反馈、澄清回复；普通知识问答不触发即时观察。 | V2-P03 | `learningObservation.js`、`useDailyLearning.js`、`learningSessionStorage.js`、`useLearningChat.js`、`api/chat.js` | 学习反馈与澄清可观察，普通提问不重复调用；无任务场景按确认策略验收。 | PASS | P05 Edge 验证同一澄清跨日回应后产生一次观察，读取原问题 ID 和用户回复；暂缓不触发观察。P03 的任务及项目反馈策略保持。 |
 | V2-OBS-09 | §7.4、12.9、10.4 | 普通勾选、渲染和无变化不调用模型；重复反馈或同一事件不重复发起。 | V2-P03 | `learningObservation.js`、`useDailyLearning.js`、`learningSessionStorage.js`、`useLearningChat.js`、`api/chat.js` | Mock 统计请求次数，双提交与刷新不会重复启动。 | PASS | P04 Edge 截获 Agent 接口调用，确认双标签切日至 Day 3 只产生一轮，刷新和重复反馈不会重放，轮内请求与回执数匹配。 |
 | V2-OBS-10 | §9.2、7.3 | 跨日、项目重置和任务调整期间的迟到答复不串关联，历史问答仍可恢复。 | V2-P03 | `learningObservation.js`、`useDailyLearning.js`、`learningSessionStorage.js`、`useLearningChat.js`、`api/chat.js` | 旧消息落回发送时记录；已结束项目的回调不得写入新会话。 | PASS | Edge 验证迟到答复归原日、切换项目后不写入新会话；单测调整有效计划并移除任务定义后，仍按原实例保存和读取旧答复。 |
 
@@ -78,8 +78,8 @@ P00 已审核，随阶段更新，来源为 [V2 原始规格](v2-spec.md)。阶�
 | V2-AG-02 | §7.5.1–6 | 默认保守；普通问题和偶发漏练不自动调整，区分没时间、没执行、没理解、不熟练；严重即时困难可及时帮助，证据不足可等待。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 对比稳定、偶发、重复、严重即时与空历史样例（§11）。 | PASS | 真实轻量样例保留正常安排，用户明确表示时间不足或练习困惑时选择不同动作；默认保守和缺证据等待见 Prompt 与测试。 |
 | V2-AG-03 | §7.5.7–12 | 优先低成本小动作；参考先前帮助，避免重复、盲目降标和按自评判定掌握；不改历史及无故全量重规划。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 受控输入和最终变更比较，检查历史、必要要求和全量规划调用不变。 | PASS | learningAgent.test.js 拒绝同轮重复指导、无新记录的后续重提和取消完成标准；原始计划及历史逐项比对。真实缩短练习也通过独立核验。 |
 | V2-AG-04 | §7.6 Action 1、8.6 | KEEP_PLAN 正常结束，无计划变动和重复提示。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 执行后计划版本不变，保存决策但 UI 不打断。 | PASS | 真实稳定样例回执 kept，计划和提示均无变化；固定响应 Edge 切日不插入技术步骤。 |
-| V2-AG-05 | §7.6 Action 2 | GUIDE 实际发布有任务归属和资料支持的教学提示，不写计划。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 执行器产出可见提示，引用可查，计划版本不变。 | PARTIAL | 真实发布任务级 GUIDE，引用逐字匹配，独立核验通过且有效计划不变。用户可见提示接入留待 P05。 |
-| V2-AG-06 | §7.6 Action 3 | CLARIFY 发出简短且未回答过的问题，允许等待。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 已有答案不重复问，未回复时保持安全安排。 | PARTIAL | 单测验证澄清保存、等待回执、不重复及未回复仍能切日；用户回答和忽略的交互留待 P05。 |
+| V2-AG-05 | §7.6 Action 2 | GUIDE 实际发布有任务归属和资料支持的教学提示，不写计划。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 执行器产出可见提示，引用可查，计划版本不变。 | PASS | P04 真实 GUIDE 由本地执行器保存，P05 Edge 验证在今日页按任务展示并定位精确引用，计划和实际进度不变。 |
+| V2-AG-06 | §7.6 Action 3 | CLARIFY 发出简短且未回答过的问题，允许等待。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 已有答案不重复问，未回复时保持安全安排。 | PASS | P05 Edge 验证澄清进入答疑面板，可稍后再说、继续下一日、回看原任务并回复；实际观察包含旧问题和用户原话。P04 不重问回归继续通过。 |
 | V2-AG-07 | §7.6 Action 4 | DECOMPOSE_TASK 实际生成局部子任务，保留原目标、必要依赖和资料依据。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 合法拆解进入新安排，历史不改，依赖绕过被拒。 | PASS | 已确认 Q5（DEC-013）；待确认时不改路线，接受后创建两个有来源子任务，串联前置且保留原目标和已封存学习日；单测验证撤销和依赖拦截。 |
 | V2-AG-08 | §7.6 Action 5 | ADJUST_PRACTICE 可调整时长、频率、难度、步骤和复核时机，只改必要字段。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 逐个属性验证补丁及历史隔离。 | PASS | 已确认 Q5（DEC-013）；单测验证五种属性写入、历史隔离及原文频率保护；真实 DeepSeek 经核验将当前未开始练习从 6 分钟改为 3 分钟。 |
 | V2-AG-09 | §7.6 Action 6 | RESCHEDULE 可后延、独立提前、减负或重排复习，依赖始终有效。 | V2-P04 | `api/learning-agent.js`、`learningAgent.js`、`agentActions.js`、`agentPlanChanges.js` | 有依赖和无依赖任务对照，巩固不清除原完成。 | PASS | 已确认 Q5（DEC-013）；执行器测试覆盖延期、下一日提高顺序优先级和巩固选学，阻塞任务不能提前，旧完成时间保持。 |
@@ -103,14 +103,14 @@ P00 已审核，随阶段更新，来源为 [V2 原始规格](v2-spec.md)。阶�
 
 | 需求 ID | 原规格 | 需求 | 阶段 | 计划位置 | 验收方式 | 状态 | 实际证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| V2-UI-01 | §8.1 | 教学干预融入现有学习页与答疑，不增加独立 Agent 后台。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 现有三入口与日任务可达，无需理解技术概念。 | TODO | — |
-| V2-UI-02 | §8.2 | 指导简短、关联任务，不展示无依据鼓励或重复寄语。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 真实提示可定位任务及来源，对无新证据场景无重复。 | TODO | — |
-| V2-UI-03 | §8.3 | 今日轻量提示可查看原因、受影响任务和生效后的新安排。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 对比变更前后渲染与实际调度一致。 | TODO | — |
-| V2-UI-04 | §8.3、4.2 | 尚未产生关联学习记录或反馈的调整可撤销。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 撤销一次并刷新，旧计划及记录无重复。 | TODO | 已确认 Q5（DEC-013）；功能证据 — |
-| V2-UI-05 | §8.3 | 已产生关联学习记录或反馈的调整通过新变更恢复安排，保留历史。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 实践后再恢复，旧记录和调整均可查。 | TODO | 已确认 Q5（DEC-013）；功能证据 — |
-| V2-UI-06 | §8.4 | 复用答疑处理澄清，可答或忽略，未答时可以继续学习。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 回答后记录回到观察，忽略后仍能推进。 | TODO | — |
-| V2-UI-07 | §8.5、13.3 | 高影响调整可接受或拒绝，拒绝留原计划与结果，无新证据不反复提。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 验收接受、拒绝、重复接受、过时提案、无新证据重提。 | TODO | 已确认 Q5（DEC-013）；功能证据 — |
-| V2-UI-08 | §8.6 | 无干预直接进入学习，无额外步骤和技术日志展示。 | V2-P05 | `LearningView.jsx`、`ChatPanel.jsx`、教学提示／变更操作组件 | 真实保持计划路径用户可直接继续。 | TODO | — |
+| V2-UI-01 | §8.1 | 教学干预融入现有学习页与答疑，不增加独立 Agent 后台。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 现有三入口与日任务可达，无需理解技术概念。 | PASS | Edge 核对今日页和既有答疑承载指导与澄清，仍只有三个侧栏入口。历史路线、原文定位及 V1 回归通过。 |
+| V2-UI-02 | §8.2 | 指导简短、关联任务，不展示无依据鼓励或重复寄语。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 真实提示可定位任务及来源，对无新证据场景无重复。 | PASS | Edge 验证任务名、提示正文和精确引用，刷新可查看且不重放。P04 真实指导及重复提示拦截已补入验收。 |
+| V2-UI-03 | §8.3 | 今日轻量提示可查看原因、受影响任务和生效后的新安排。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 对比变更前后渲染与实际调度一致。 | PASS | Edge 展开练习调整查看原因、任务、6 分钟 → 3 分钟，今日实例实际为 3 分钟；任务拆解展示新增任务和前置条件。 |
+| V2-UI-04 | §8.3、4.2 | 尚未产生关联学习记录或反馈的调整可撤销。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 撤销一次并刷新，旧计划及记录无重复。 | PASS | 已确认 Q5（DEC-013）；Edge 在没有关联记录时点击撤销，今日实例恢复到 6 分钟，刷新仍为已撤销；单测验证后续变更时不会开放失效操作。 |
+| V2-UI-05 | §8.3 | 已产生关联学习记录或反馈的调整通过新变更恢复安排，保留历史。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 实践后再恢复，旧记录和调整均可查。 | PASS | 已确认 Q5（DEC-013）；Edge 完成受调整的练习后点击恢复先前安排，有效计划返回 6 分钟，保留已经完成的 3 分钟实例及时间，并另存一条变更；刷新完整恢复。 |
+| V2-UI-06 | §8.4 | 复用答疑处理澄清，可答或忽略，未答时可以继续学习。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 回答后记录回到观察，忽略后仍能推进。 | PASS | Edge 通过原答疑暂缓，推进后回复旧问题，消息仍归发送目标任务原日，当前轮读取问题和原话。单测覆盖项目级、伪造归属和重复提交。 |
+| V2-UI-07 | §8.5、13.3 | 高影响调整可接受或拒绝，拒绝留原计划与结果，无新证据不反复提。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 验收接受、拒绝、重复接受、过时提案、无新证据重提。 | PASS | 已确认 Q5（DEC-013）；Edge 验证接受、连点、拒绝、跨日过期及无新反馈重提被拒。接受前原有效安排维持，拒绝后原计划仍保存。 |
+| V2-UI-08 | §8.6 | 无干预直接进入学习，无额外步骤和技术日志展示。 | V2-P05 | `DailyLearningView.jsx`、`TeachingUpdates.jsx`、`ChatPanel.jsx`、`teachingInteractions.js` | 真实保持计划路径用户可直接继续。 | PASS | 通过真实 DeepSeek 的稳定样例从浏览器直接推进学习日，无技术日志、额外教学区或强制操作，原有三个面板保持收起。 |
 
 ## 功能验收及回归
 

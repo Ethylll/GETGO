@@ -4,6 +4,7 @@ import { sourceText } from './learningSources.js'
 import { activeLearningPlan, snapshotDailyTask } from './learningDays.js'
 import { storedObservations } from './learningObservation.js'
 import { restoredAgentState } from './learningAgent.js'
+import { clarificationContext } from './teachingInteractions.js'
 
 export const LEARNING_SESSION_KEY = 'getgo.learningSession'
 const SESSION_VERSION = 1
@@ -43,13 +44,26 @@ function storedMessages(messages, plan, session) {
   const taskIds = new Set(plan.tasks.map(({ id }) => id))
   const evidence = new Map(plan.sources.filter((source) => source.status === 'processed').map((source) => [source.sourceId, sourceText(source)]))
   const ids = new Set()
+  const clarificationIds = new Set()
   const result = []
   const days = session && new Map(session.days.map((day) => [day.id, day]))
+  const notes = new Map((session?.agent?.notes ?? []).map((note) => [note.id, note]))
 
   for (const turn of messages) {
     if (!turn || typeof turn.id !== 'string' || !turn.id || ids.has(turn.id) ||
       typeof turn.question !== 'string' || !turn.question.trim() || turn.question.length > QUESTION_LIMIT ||
       !Number.isFinite(turn.createdAt)) continue
+    if (session && turn.status === 'clarification') {
+      const note = notes.get(turn.clarificationId)
+      const context = clarificationContext(session, note)
+      if (!context || clarificationIds.has(note.id) || turn.createdAt < note.createdAt ||
+        Object.keys(context).some((key) => context[key] !== turn[key])) continue
+      ids.add(turn.id)
+      clarificationIds.add(note.id)
+      result.push({ id: turn.id, ...context, clarificationId: note.id, question: turn.question,
+        createdAt: turn.createdAt, status: 'clarification', answer: '', citations: [] })
+      continue
+    }
     const day = days?.get(turn.dayId)
     if (session) {
       if (turn.projectId !== session.projectId || !day) continue
@@ -142,7 +156,8 @@ export function saveDailyLearningSession(session, storage) {
     const plan = toStoredPlan(session.plan)
     const effective = session.effectivePlan && toStoredPlan({ ...session.effectivePlan, sources: plan.sources })
     const { projectId, revision, limits, days } = session
-    const messages = storedMessages(session.messages, plan, session)
+    const agent = session.agent ? restoredAgentState(session.agent, session) : undefined
+    const messages = storedMessages(session.messages, plan, { ...session, agent })
     const snapshot = { version: 2, projectId, revision, limits, plan, effectivePlan: effective && { ...effective, sources: undefined },
       days: days.map(({ id, dayNumber, startedAt, endedAt, limits: dayLimits, instances }) => ({
         id, dayNumber, startedAt, endedAt, limits: dayLimits,
@@ -151,7 +166,7 @@ export function saveDailyLearningSession(session, storage) {
         })),
       })),
       messages, observations: storedObservations(session.observations, new Set(days.map(({ id }) => id)), messages),
-      ...(session.agent ? { agent: restoredAgentState(session.agent, session) } : {}),
+      ...(agent ? { agent } : {}),
     }
     const target = storage ?? globalThis.localStorage
     target.setItem(LEARNING_SESSION_KEY, JSON.stringify(snapshot))
@@ -176,10 +191,10 @@ export function loadLearningSession(storage) {
     if (!snapshot || typeof snapshot !== 'object') return { status: 'invalid', reason: 'data' }
     if (snapshot.version === 2) {
       if (!validDailySession(snapshot)) return { status: 'invalid', reason: 'data' }
-      const messages = storedMessages(snapshot.messages, snapshot.plan, snapshot)
-      const session = { ...snapshot, messages,
+      const agent = snapshot.agent ? restoredAgentState(snapshot.agent, snapshot) : undefined
+      const messages = storedMessages(snapshot.messages, snapshot.plan, { ...snapshot, agent })
+      const session = { ...snapshot, ...(agent ? { agent } : {}), messages,
         observations: storedObservations(snapshot.observations, new Set(snapshot.days.map(({ id }) => id)), messages) }
-      if (snapshot.agent) session.agent = restoredAgentState(snapshot.agent, session)
       return { status: 'restored', plan: activeLearningPlan(session), session }
     }
     if (snapshot.version !== SESSION_VERSION) return { status: 'invalid', reason: 'version' }

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { chatScopeKey, scopedChatTurns } from './chatMessages.js'
 import { activeLearningPlan, feedbackCriteria, getOneTimeProgress } from './learningDays.js'
 import LearningTools, { LearningSteps, References, useLearningTools } from './LearningTools.jsx'
+import TeachingUpdates from './TeachingUpdates.jsx'
+import { clarificationCards } from './teachingInteractions.js'
 import { useDailyLearning } from './useDailyLearning.js'
 import { useLearningChat } from './useLearningChat.js'
 
@@ -132,7 +134,7 @@ function DailyRoute({ plan, day, days, done, focusedId, projectQuestionDays, onT
 }
 
 export default function DailyLearningView({ initialPlan, sourceFiles, restored }) {
-  const { session, storageStatus, dispatch, updateMessages } = useDailyLearning(initialPlan, restored)
+  const { session, storageStatus, dispatch, updateMessages, decideChange, respondToPrompt } = useDailyLearning(initialPlan, restored)
   const plan = activeLearningPlan(session)
   const tools = useLearningTools(plan)
   const { messages, pendingKey, sendQuestion } = useLearningChat(plan, undefined, { messages: session.messages, updateMessages })
@@ -151,7 +153,19 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
   const activeInstance = review ? review.instance : focused
   const chatContext = { projectId: session.projectId, dayId: review ? review.dayId : day.id, instanceId: activeInstance?.id ?? null }
   const chatTaskId = task?.id ?? null
-  const projectQuestionDays = new Set(messages.filter(({ taskId }) => taskId === null).map(({ dayId }) => dayId))
+  const projectQuestionDays = new Set([...messages, ...(session.agent?.notes ?? [])]
+    .filter(({ taskId }) => taskId === null).map(({ dayId }) => dayId))
+  const taskTitles = new Map([...session.plan.tasks, ...session.days.flatMap(({ instances }) => instances.map(({ task }) => task)),
+    ...plan.tasks].map(({ id, title }) => [id, title]))
+  for (const change of session.agent?.changes ?? []) {
+    for (const { taskId, before, after } of change.delta.tasks) {
+      if (!taskTitles.has(taskId)) taskTitles.set(taskId, (after ?? before).title)
+    }
+  }
+  const clarifications = clarificationCards(session, day.id, chatContext.dayId, chatTaskId, Boolean(review)).map((note) => ({
+    ...note, taskTitle: note.taskTitle ?? (note.taskId === null ? '学习项目' : taskTitles.get(note.taskId) ?? '相关任务'),
+    dayNumber: session.days.find(({ id }) => id === note.dayId)?.dayNumber,
+  }))
 
   function select(id) {
     setReview(null)
@@ -226,6 +240,8 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
         {task && <TaskDetail key={activeInstance?.id ?? task.id} task={task} instance={activeInstance} tools={tools}
           criteria={[...new Set([...feedbackCriteria(plan, task.id), task.selfCheck].filter(Boolean))]}
           onAction={changeTask} isReviewing={Boolean(review)} />}
+        <TeachingUpdates session={session} day={day} review={review} taskTitles={taskTitles} tools={tools} onCommand={decideChange}
+          onOpenChat={tools.openChat} />
         <footer className="mt-6 border-t border-line pt-4">
           {completed < required.length && <p className="mb-2 text-xs text-muted">还有未完成任务，原记录会保留。</p>}
           <button key={day.id} type="button" className="secondary-button min-h-11 rounded-full px-4 text-sm font-semibold" onClick={advance}
@@ -239,7 +255,7 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
           projectQuestionDays={projectQuestionDays} onProjectHistory={openProjectHistory} focusedId={focused?.id} />}
         chat={{ task, canAsk: !review, dayNumber: review ? review.dayNumber : day.dayNumber,
           scopeKey: chatScopeKey(chatTaskId, chatContext), messages: scopedChatTurns(messages, chatTaskId, chatContext), pendingKey,
-          onSend: (selectedTask, draft) => sendQuestion(selectedTask, draft, chatContext) }} />
+          clarifications, onClarification: respondToPrompt, onSend: (selectedTask, draft) => sendQuestion(selectedTask, draft, chatContext) }} />
     </div>
   )
 }
