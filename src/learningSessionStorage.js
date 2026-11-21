@@ -1,5 +1,5 @@
 import { isValidLearningPlan } from './services/validateLearningPlan.js'
-import { isEvidenceAnswer, QUESTION_LIMIT } from './chatMessages.js'
+import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT } from './chatMessages.js'
 import { sourceText } from './learningSources.js'
 
 export const LEARNING_SESSION_KEY = 'getgo.learningSession'
@@ -47,11 +47,11 @@ function storedMessages(messages, plan) {
     let answer = ''
     let citations = []
     if (isEvidenceAnswer(status)) {
-      if (!Array.isArray(turn.citations) || !turn.citations.length || turn.citations.length > 4 ||
-        !turn.citations.every((ref) => typeof ref?.excerpt === 'string' && ref.excerpt.trim().length >= 4 && evidence.get(ref.sourceId)?.includes(ref.excerpt))) continue
+      if (typeof turn.answer !== 'string' || !turn.answer.trim() || turn.answer.length > ANSWER_LIMIT ||
+        !Array.isArray(turn.citations) || !turn.citations.length || turn.citations.length > CITATION_LIMIT ||
+        !turn.citations.every((ref) => typeof ref?.excerpt === 'string' && ref.excerpt.trim().length >= 2 && evidence.get(ref.sourceId)?.includes(ref.excerpt))) continue
       citations = copyRefs(turn.citations)
-      answer = citations.map((ref) => ref.excerpt).join('\n')
-      if (turn.answer !== answer || (status === 'conflict' && new Set(citations.map((ref) => ref.sourceId)).size < 2)) continue
+      answer = turn.answer
     } else if (!['insufficient', 'interrupted', 'error'].includes(status)) continue
 
     ids.add(turn.id)

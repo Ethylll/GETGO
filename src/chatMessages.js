@@ -1,4 +1,6 @@
 export const QUESTION_LIMIT = 600
+export const ANSWER_LIMIT = 1200
+export const CITATION_LIMIT = 12
 
 export const chatStatusText = {
   insufficient: '在你提供的资料中没有找到足够依据，因此无法可靠回答这个问题。',

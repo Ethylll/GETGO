@@ -145,3 +145,22 @@ test('刷新后恢复答疑历史和引用，按任务筛选上下文，未完�
   assert.equal(recovered.progress.currentTaskId, 'posture')
   assert.deepEqual(recovered.messages.map(({ id }) => id), ['b', 'pending'])
 })
+
+test('自然语言和部分回答可原样刷新和追问，旧摘录兼容，伪造引用丢弃', async () => {
+  const storage = memoryStorage()
+  const plan = await learningPlan()
+  const progress = createLearningProgress(plan)
+  const base = { taskId: 'posture', createdAt: 12, question: '我怎么把琴拿稳？',
+    citations: [{ sourceId: 'text', excerpt: '把乐器放稳。' }] }
+  const messages = [
+    { ...base, id: 'natural', status: 'answered', answer: '先让琴身稳住。' },
+    { ...base, id: 'partial', status: 'partial', answer: '资料建议先把琴扶稳。' },
+    { ...base, id: 'original', status: 'answered', answer: '把乐器放稳。' },
+  ]
+  const forged = { ...base, id: 'forged', status: 'answered', answer: '假的', citations: [{ sourceId: 'text', excerpt: '错误引用' }] }
+  assert.equal(saveLearningSession(plan, { ...progress, messages: [...messages, forged] }, storage), true)
+  const restored = loadLearningSession(storage)
+  assert.deepEqual(restored.messages, messages)
+  assert.deepEqual(taskChatHistory(restored.messages, 'posture').map(({ answer }) => answer), messages.map(({ answer }) => answer))
+  assert.deepEqual(taskChatHistory(restored.messages, 'chord'), [])
+})

@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { groundedAnswer, insufficient, retrieveChunks, validateDraft } from '../server/chatRag.js'
+import { randomUUID } from 'node:crypto'
+import { fuseRetrieval, insufficient, prepareRetrieval } from '../server/chatRag.js'
+import { composeAnswer, validateClaims } from '../server/chatClaims.js'
 import { QUESTION_LIMIT } from '../src/chatMessages.js'
 
 const ENDPOINT = 'https://api.deepseek.com/chat/completions'
@@ -74,7 +76,15 @@ function normalizeInput(body) {
   }
 }
 
-export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.env, timeoutMs = 22_000 } = {}) {
+function modelChunk({ chunkId, sourceId, title, text, start, end }) {
+  return { chunkId, sourceId, title, text, start, end }
+}
+
+function logDiagnostic(event) {
+  console.info(JSON.stringify({ event: 'getgo.chat', ...event }))
+}
+
+export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.env, timeoutMs = 27_000, report = logDiagnostic } = {}) {
   let windowStarted = 0
   let requests = 0
 
@@ -88,15 +98,21 @@ export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.
     if (!input) return error('答疑请求无效，请检查问题长度和学习资料。', 400)
 
     const { question, topic, task, sources, history } = input
-    const evidence = retrieveChunks(input).map(({ sourceId, title, text, start, end }) =>
-      ({ sourceId, title, text, start, end }))
-    if (!evidence.length) return json(insufficient())
+    const { candidates, lexical } = prepareRetrieval(input)
+    const requestId = randomUUID()
+    const record = (reason, details = {}) => report({ requestId, reason, ...details })
+    const decline = (reason) => {
+      record(reason)
+      return json(insufficient())
+    }
+    if (!candidates.length) return decline('no_searchable_sources')
     const key = env.DEEPSEEK_API_KEY?.trim()
     if (!key) return error('服务端尚未配置 DeepSeek API 密钥。', 503)
 
     let prompts
     try {
       prompts = (await Promise.all([
+        readFile(join(process.cwd(), 'server', 'prompts', 'tutor.retrieve.md'), 'utf8'),
         readFile(join(process.cwd(), 'server', 'prompts', 'tutor.system.md'), 'utf8'),
         readFile(join(process.cwd(), 'server', 'prompts', 'tutor.verify.md'), 'utf8'),
       ])).map((prompt) => prompt.trim())
@@ -104,7 +120,7 @@ export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.
     } catch {
       return error('服务端无法加载答疑规则，请稍后重试。', 500)
     }
-    const [tutorPrompt, verifyPrompt] = prompts
+    const [retrievalPrompt, tutorPrompt, verifyPrompt] = prompts
 
     const now = Date.now()
     if (now - windowStarted >= 60_000) {
@@ -139,20 +155,61 @@ export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.
       return { output: JSON.parse(choice.message.content) }
     }
 
+    let stage = 'retrieval'
     try {
-      const draft = await complete(tutorPrompt, { topic, task, question, history, evidence }, 1500)
-      if (draft.failure) return draft.failure
-      const answer = validateDraft(draft.output, sources, evidence, { question, history })
-      if (answer.status === 'insufficient') return json(answer)
+      const frame = { topic, question, task: task.title, history }
+      const ranked = await complete(retrievalPrompt, { ...frame, candidates: candidates.map(modelChunk) }, 800)
+      if (ranked.failure) {
+        record('upstream_error', { stage })
+        return ranked.failure
+      }
+      if (!Array.isArray(ranked.output?.matches) || ranked.output.matches.length > candidates.length ||
+        !ranked.output.matches.every((match) => typeof match?.chunkId === 'string' && [0, 1, 2, 3].includes(match.relevance))) {
+        throw new Error('invalid ranking')
+      }
+      const retrieval = fuseRetrieval(candidates, ranked.output.matches)
+      record('retrieval', {
+        candidates: candidates.length,
+        lexical: lexical.map(({ chunkId, relevance }) => ({ chunkId, relevance })),
+        evidence: retrieval.map(({ chunkId, semanticScore, fusedScore }) => ({ chunkId, semanticScore, fusedScore })),
+      })
+      if (!retrieval.length) return decline('no_relevant_evidence')
 
-      const previousQuestion = history.at(-1)?.question
-      const verified = await complete(verifyPrompt, { question, previousQuestion, draft: answer, context: evidence }, 120)
-      if (verified.failure) return verified.failure
-      const verdict = verified.output?.status
-      if (answer.status === 'conflict') return json(verdict === 'conflict' ? answer : insufficient())
-      if (!['answered', 'partial'].includes(verdict)) return json(insufficient())
-      return json(verdict === 'partial' ? groundedAnswer('partial', answer.answer, answer.citations) : answer)
+      const evidence = retrieval.map(modelChunk)
+      stage = 'generation'
+      const draft = await complete(tutorPrompt, { ...frame, evidence }, 2000)
+      if (draft.failure) {
+        record('upstream_error', { stage })
+        return draft.failure
+      }
+      const proposal = draft.output
+      if (!['complete', 'partial', 'insufficient'].includes(proposal?.coverage) ||
+        !Array.isArray(proposal.claims) || proposal.claims.length > 4) throw new Error('invalid draft')
+      if (proposal.coverage === 'insufficient' || !proposal.claims.length) return decline('generator_abstained')
+      const claims = validateClaims(proposal, sources, evidence)
+      if (claims.length !== proposal.claims.length) record('claim_validation_rejected', { count: proposal.claims.length - claims.length })
+      if (!claims.length) return decline('no_valid_claim_citations')
+
+      stage = 'verification'
+      const verified = await complete(verifyPrompt, { question, history, claims, context: evidence }, 550)
+      if (verified.failure) {
+        record('upstream_error', { stage })
+        return verified.failure
+      }
+      const review = verified.output
+      const expected = new Set(claims.map(({ id }) => id))
+      if (!['complete', 'partial'].includes(review?.coverage) || !Array.isArray(review.verdicts) ||
+        review.verdicts.length !== claims.length || !review.verdicts.every((item) =>
+          expected.delete(item?.id) && ['supported', 'unsupported', 'conflict'].includes(item.verdict))) {
+        throw new Error('invalid verification')
+      }
+      const answer = composeAnswer(proposal, claims, review)
+      if (answer.status === 'insufficient') return decline('no_semantically_supported_claims')
+      record('answer', { status: answer.status, reviewed: claims.length, citationCount: answer.citations.length,
+        unsupported: review.verdicts.filter(({ verdict }) => verdict === 'unsupported').length })
+      return json(answer)
     } catch {
+      record(controller.signal.aborted ? 'timeout' : 'upstream_or_protocol_error', { stage })
       return controller.signal.aborted
         ? error('DeepSeek 答疑超时，请重试。', 504)
         : error('DeepSeek 响应异常或格式无效，请重试。', 502)

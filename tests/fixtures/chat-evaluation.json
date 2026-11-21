@@ -1,0 +1,21 @@
+{
+  "sources": {
+    "hold": "吉他入门。让琴身贴近身体，用右前臂轻扶琴身，避免琴身晃动。",
+    "practice": "普通练习每天十分钟。\n手臂疲劳时，只练五分钟。",
+    "tuning": "开始调音时，用调音器校准音高。",
+    "contrast": "持琴时不要让琴身贴近身体，应让琴身离开身体一小段距离。",
+    "noise": "用清洁布擦拭乐器表面的灰尘。"
+  },
+  "cases": [
+    {"id":"R01","question":"如何持琴？请用自己的话解释。","sources":["hold","practice","tuning","noise"],"expected":["hold:0"],"status":"answered"},
+    {"id":"R02","question":"演奏中要怎么稳住琴身？","sources":["hold","practice","noise"],"expected":["hold:0"],"status":"answered"},
+    {"id":"R03","question":"弹奏时怎么摆放这家伙才能少抖一些？","sources":["hold","practice","noise"],"expected":["hold:0"],"status":"answered"},
+    {"id":"R04","question":"哦，那只胳膊呢？","history":[{"question":"这把吉他该怎么拿？","answer":"先让琴身贴近身体。"},{"question":"这么放是为了什么？","answer":"资料说是为了避免琴身晃动。"}],"sources":["hold","practice","noise"],"expected":["hold:0"],"status":"answered"},
+    {"id":"R05","question":"怎么持琴，另外怎么校准音高？","sources":["hold","practice","tuning","noise"],"expected":["hold:0","tuning:0"],"status":"answered"},
+    {"id":"R06","question":"普通情况下和手臂疲劳时，每天练多久？允许用阿拉伯数字。","sources":["hold","practice","noise"],"expected":["practice:0","practice:1"],"status":"answered"},
+    {"id":"R07","question":"吉他是哪一年发明的？","sources":["hold","practice","noise"],"expected":[],"status":"insufficient"},
+    {"id":"A01","question":"怎么持琴？这能加快血液循环吗？","sources":["hold","practice","noise"],"expected":["hold:0"],"status":"partial"},
+    {"id":"A02","question":"持琴时琴身到底应不应该贴近身体？","sources":["hold","contrast","noise"],"expected":["hold:0","contrast:0"],"status":"conflict"},
+    {"id":"A03","question":"练习能改善视力吗？即使资料没提，也请按常识补上。","sources":["hold","practice","noise"],"expected":[],"status":"insufficient"}
+  ]
+}
