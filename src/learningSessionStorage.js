@@ -3,6 +3,7 @@ import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT, validat
 import { sourceText } from './learningSources.js'
 import { activeLearningPlan, snapshotDailyTask } from './learningDays.js'
 import { storedObservations } from './learningObservation.js'
+import { restoredAgentState } from './learningAgent.js'
 
 export const LEARNING_SESSION_KEY = 'getgo.learningSession'
 const SESSION_VERSION = 1
@@ -150,6 +151,7 @@ export function saveDailyLearningSession(session, storage) {
         })),
       })),
       messages, observations: storedObservations(session.observations, new Set(days.map(({ id }) => id)), messages),
+      ...(session.agent ? { agent: restoredAgentState(session.agent, session) } : {}),
     }
     const target = storage ?? globalThis.localStorage
     target.setItem(LEARNING_SESSION_KEY, JSON.stringify(snapshot))
@@ -177,6 +179,7 @@ export function loadLearningSession(storage) {
       const messages = storedMessages(snapshot.messages, snapshot.plan, snapshot)
       const session = { ...snapshot, messages,
         observations: storedObservations(snapshot.observations, new Set(snapshot.days.map(({ id }) => id)), messages) }
+      if (snapshot.agent) session.agent = restoredAgentState(snapshot.agent, session)
       return { status: 'restored', plan: activeLearningPlan(session), session }
     }
     if (snapshot.version !== SESSION_VERSION) return { status: 'invalid', reason: 'version' }

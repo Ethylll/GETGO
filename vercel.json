@@ -3,6 +3,10 @@
     "api/analysis.js": {
       "includeFiles": "server/prompts/analysis.*.md",
       "maxDuration": 45
+    },
+    "api/learning-agent.js": {
+      "includeFiles": "server/prompts/learning-agent.system.md",
+      "maxDuration": 15
     }
   }
 }

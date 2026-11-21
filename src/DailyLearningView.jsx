@@ -52,6 +52,10 @@ function TaskDetail({ task, instance, criteria, tools, onAction, isReviewing }) 
         <details className="space-y-2 rounded-xl bg-oat px-3 py-2 text-xs leading-relaxed text-muted">
           <summary className="cursor-pointer font-semibold text-ink">持续练习安排</summary>
           <p>{task.practice.longTermGoal}</p>
+          {task.practice.difficulty && <div>
+            <p>练习难度 · {task.practice.difficulty.text}</p>
+            <References references={task.practice.difficulty.sourceRefs} sources={tools.sources} label="查看难度安排来源" onOpen={tools.openSource} />
+          </div>}
           <PracticeTiming label="练习间隔" timing={task.practice.frequency} tools={tools} />
           <PracticeTiming label="复核间隔" timing={task.practice.reviewAfter} tools={tools} />
           <p>停止参考 · {task.practice.reviewCriteria.stop}</p>
@@ -220,7 +224,8 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
           返回今日学习{review.dayNumber ? ` · 正在回看 Day ${review.dayNumber}` : ''}
         </button>}
         {task && <TaskDetail key={activeInstance?.id ?? task.id} task={task} instance={activeInstance} tools={tools}
-          criteria={feedbackCriteria(plan, task.id)} onAction={changeTask} isReviewing={Boolean(review)} />}
+          criteria={[...new Set([...feedbackCriteria(plan, task.id), task.selfCheck].filter(Boolean))]}
+          onAction={changeTask} isReviewing={Boolean(review)} />}
         <footer className="mt-6 border-t border-line pt-4">
           {completed < required.length && <p className="mb-2 text-xs text-muted">还有未完成任务，原记录会保留。</p>}
           <button key={day.id} type="button" className="secondary-button min-h-11 rounded-full px-4 text-sm font-semibold" onClick={advance}

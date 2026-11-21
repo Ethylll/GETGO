@@ -59,6 +59,8 @@ export function isValidV2Task(task, recurringPrerequisiteIds, evidenceById) {
   if (!['oneTime', 'recurring'].includes(task.type) || task.status !== 'notStarted' ||
     !Number.isInteger(task.estimatedMinutes) || task.estimatedMinutes < 1 ||
     task.estimatedMinutes > DEFAULT_LEARNING_DAY_LIMITS.minutes || !isNonEmptyText(task.completionCriteria) ||
+    (task.auxiliary !== undefined && task.auxiliary !== true) ||
+    (task.selfCheck !== undefined && (task.type !== 'oneTime' || !task.auxiliary || !isNonEmptyText(task.selfCheck))) ||
     !Array.isArray(task.prerequisiteGates) || task.prerequisiteGates.length !== recurringPrerequisiteIds.length) return false
 
   const remaining = new Set(recurringPrerequisiteIds)
@@ -70,6 +72,8 @@ export function isValidV2Task(task, recurringPrerequisiteIds, evidenceById) {
   return practice?.startCondition === (task.prerequisiteTaskIds.length ? 'afterPrerequisites' : 'immediate') &&
     isValidPracticeTiming(practice.frequency, evidenceById) && isValidPracticeTiming(practice.reviewAfter, evidenceById) &&
     isNonEmptyText(practice.longTermGoal) &&
+    (practice.difficulty === undefined || (isNonEmptyText(practice.difficulty?.text) &&
+      hasValidSourceRefs(practice.difficulty.sourceRefs, evidenceById))) &&
     ['stop', 'reduce', 'adjust'].every((key) => isNonEmptyText(practice.reviewCriteria?.[key]))
 }
 
