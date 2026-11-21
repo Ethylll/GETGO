@@ -1,12 +1,14 @@
 import { useRef, useState } from 'react'
 import { chatStatusText, isEvidenceAnswer, QUESTION_LIMIT, taskChatHistory } from './chatMessages.js'
 
-export function useLearningChat(plan, initialMessages) {
-  const [messages, setMessages] = useState(initialMessages ?? [])
+export function useLearningChat(plan, initialMessages, shared) {
+  const [localMessages, setLocalMessages] = useState(initialMessages ?? [])
+  const messages = shared?.messages ?? localMessages
+  const setMessages = shared?.updateMessages ?? setLocalMessages
   const [pendingTaskId, setPendingTaskId] = useState(null)
   const sending = useRef(false)
 
-  async function sendQuestion(task, draft) {
+  async function sendQuestion(task, draft, context) {
     const question = draft.trim()
     if (sending.current || !task || !question || question.length > QUESTION_LIMIT) return
 
@@ -18,7 +20,8 @@ export function useLearningChat(plan, initialMessages) {
     const history = taskChatHistory(messages, taskId)
     sending.current = true
     setPendingTaskId(taskId)
-    setMessages((previous) => [...previous, { id, taskId, question, createdAt: Date.now(), status: 'pending', answer: '', citations: [] }])
+    const createdAt = Date.now()
+    setMessages((previous) => [...previous, { id, taskId, question, createdAt, status: 'pending', answer: '', citations: [], ...context }])
 
     let result = { status: 'error', answer: '', citations: [] }
     try {

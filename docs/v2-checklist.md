@@ -14,10 +14,10 @@ P00 已审核，随阶段更新，来源为 [V2 原始规格](v2-spec.md)。阶�
 | 需求 ID | 原规格 | 需求 | 阶段 | 计划位置 | 验收方式 | 状态 | 实际证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | V2-WF-01 | §5.1、5.3、13.1 | 区分一次性与周期性；适合重复的知识点进入周期练习。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 用实践资料观察两类均可生成，普通一次性资料允许全为一次性。 | PASS | 真实 DeepSeek v2-mixed 与 v2-one-time 分别生成混合路线及纯一次性路线。 |
-| V2-WF-02 | §5.2、13.1 | 任务保留唯一 ID、名称、类型、目标、可执行步骤、预计时长、单次完成标准、必要前置、引用和可查询状态。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 核对模型输出、保存和 UI 读模型；缺必需字段被拒。 | PARTIAL | realAnalysis.test.js 校验任务字段、初始状态、用时和拒绝缺项；真实 V2 返回初始定义。V2-P02 验证存储、刷新和 UI 读模型。 |
+| V2-WF-02 | §5.2、13.1 | 任务保留唯一 ID、名称、类型、目标、可执行步骤、预计时长、单次完成标准、必要前置、引用和可查询状态。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 核对模型输出、保存和 UI 读模型；缺必需字段被拒。 | PASS | realAnalysis.test.js 校验任务字段、初始状态、用时和拒绝缺项；真实 V2 返回初始定义。V2-P02 验证任务定义、单次完成标准和实例状态在今日页可读，原始／有效计划及历史实例可刷新恢复（learningDays.test.js、Edge）。 |
 | V2-WF-03 | §5.2、5.3 | 周期任务含启动条件、频率、初始周期或复核节点、持续目标及停止／减量／调整条件。默认按 Day N，只有原资料明确自然间隔时按实际时间。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 读取完整周期字段，用合法与非法调度边界验证。 | PASS | 已确认 Q1（DEC-012）；真实 v2-mixed 返回 Day 频率和复核，v2-elapsed 返回逐字引用的 2880 分钟自然间隔；realAnalysis.test.js 拦截错单位和非法范围。 |
-| V2-WF-04 | §5.3 | 无原文依据的周期、频率教学建议明确标记为推导，不伪造引用。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 无频率的资料生成建议并显示标记；错误引用被拦截。 | PARTIAL | 真实 v2-mixed 的频率、复核均标记 recommendation。程序拒绝给建议附伪引用；V2-P02 验证显示标记。 |
-| V2-WF-05 | §5.3 | 保留必要依赖。周期练习只按明确可观察动作或自检反馈解锁后续任务，无门槛时可与新知识并行。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 有效混合路线通过；不能因为存在长期周期任务阻断无依赖新知识。 | PARTIAL | 已确认 Q2（DEC-012）；真实 v2-mixed 两条路线无互相依赖，realAnalysis.test.js 验证两类可观察门槛及拒绝按次数推断。V2-P02 验证实际并行排程和解锁。 |
+| V2-WF-04 | §5.3 | 无原文依据的周期、频率教学建议明确标记为推导，不伪造引用。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 无频率的资料生成建议并显示标记；错误引用被拦截。 | PASS | 真实 v2-mixed 的频率、复核均标记 recommendation。程序拒绝给建议附伪引用；Edge 使用固定 V2 计划，在练习详情确认「AI 教学建议」标记。 |
+| V2-WF-05 | §5.3 | 保留必要依赖。周期练习只按明确可观察动作或自检反馈解锁后续任务，无门槛时可与新知识并行。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 有效混合路线通过；不能因为存在长期周期任务阻断无依赖新知识。 | PASS | 已确认 Q2（DEC-012）；真实 v2-mixed 两条路线无互相依赖，realAnalysis.test.js 验证两类可观察门槛及拒绝按次数推断。Edge 验证两类任务同日并行；learningDays.test.js 验证可观察动作和精确自检条件分别解锁，新增任务只进入选学。 |
 | V2-WF-06 | §5.4 | 独立核验类型合理性和运行安排，拒绝不可执行、明显不合理的练习。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 向核验提供不合理分类及无可执行动作，验证拒绝。 | PASS | 真实独立核验接受一次性卡片整理，拒绝把它重复五次就算掌握的练习。集成测试验证拒绝会裁剪任务及依赖。 |
 | V2-WF-07 | §5.4 | 程序拒绝循环或无效的依赖；受影响的任务不能进入有效路线。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 测试自环、双向环、缺 ID 和有效依赖。 | PASS | realAnalysis.test.js 覆盖任务自环、双节点环、缺失前置与合法独立任务，拒绝无效起点。 |
 | V2-WF-08 | §5.4 | 核验明确的完成标准、真实来源及事实依据；沿用有界核验，不增加复杂多轮链。 | V2-P01 | 分析 Service、`server/learningAnalysis.js`、规划与核验 Prompt、计划校验器 | 测试含糊标准、伪造原文、明显错误和调用次数。 | PASS | 真实独立核验拒绝含糊标准和无据掌握主张。realAnalysis.test.js 拒绝缺项、伪造引用，核对正常仅一次独立核验、格式错误时有界重试。 |
@@ -29,27 +29,27 @@ P00 已审核，随阶段更新，来源为 [V2 原始规格](v2-spec.md)。阶�
 
 | 需求 ID | 原规格 | 需求 | 阶段 | 计划位置 | 验收方式 | 状态 | 实际证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| V2-DAY-01 | §6.1、6.2、13.2 | 学习页默认今日任务，保留暖色风格及现有任务详情和引用。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 新计划落地 Day 1；今日为主视图，引用仍能打开原文。 | TODO | — |
-| V2-DAY-02 | §6.1 | 完整路线主动查看整体目标、当前阶段、完成的一次性任务、后续内容与持续练习。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 打开原侧栏依次核对五类信息，并回到今日焦点。 | TODO | — |
-| V2-DAY-03 | §6.2 | 展示主题、Day N、预计时长、完成进度及两类任务分组。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 混合日、只有一类、空日与已完成日均可用。 | TODO | 已确认 Q1（DEC-012）；功能证据 — |
-| V2-DAY-04 | §6.2 | 当前任务详情、原文引用、答疑入口和下一日操作可用；存在教学调整时保留展示位。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 在桌面与手机打开各入口；调整内容由 V2-P05 联调。 | TODO | — |
-| V2-DAY-05 | §6.3 | 调度纳入已满足启动条件且到期的周期练习。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 未启动、不应出现、应出现三类实例；同日去重。 | TODO | 已确认 Q1（DEC-012）；功能证据 — |
-| V2-DAY-06 | §6.3 | 按明确前置依赖纳入可做的一次性任务。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 未满足前置不会排入，独立任务仍可推进。 | TODO | 已确认 Q2（DEC-012）；功能证据 — |
-| V2-DAY-07 | §6.3、6.6 | 保留仍需完成的一次性任务，仅在适合的学习日重排。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 跳过任务保持未完成，下个适合日出现，依赖不变。 | TODO | 已确认 Q1（DEC-012）；功能证据 — |
-| V2-DAY-08 | §6.3 | 生效的调整参与组装，待确认和失败的调整不参与。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 给定三种变更状态，调度只消费生效版本。 | TODO | — |
-| V2-DAY-09 | §6.3、13.2 | 默认每日 30 分钟、最多 5 项，可配置，无需填满。剩余配额内同日新解锁只能选学。避免欠项堆积并提供明确结束边界。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 多日积压后仍有明确定量边界和稳定选择顺序。 | TODO | 已确认 Q1（DEC-012）；功能证据 — |
-| V2-DAY-10 | §6.3、4.2 | 每日按已有计划、时长、顺序和调度纯程序组装。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 同一快照输出可重现，组装零模型调用。 | TODO | — |
-| V2-DAY-11 | §6.4 | 由用户在任意时间主动推进，Day N 与自然日期分开并记录真实操作时间。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 同天跨数个 Day，历史时间仍真实；过午夜不自动刷新。 | TODO | 已确认 Q1（DEC-012）；功能证据 — |
-| V2-DAY-12 | §6.5、13.2 | 允许未全部完成时推进，提示不阻断，独立任务照常。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 部分完成及一项未做均能继续，旧任务不会被补记已完成。 | TODO | — |
-| V2-DAY-13 | §6.5 | 推进前保存本日完成情况与已存在的相关问答，封存旧日、推进编号并组装新日。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 刷新读到旧日记录与新日；迟到的问答仍归发送日（V2-P03 联调）。 | TODO | — |
-| V2-DAY-14 | §6.6 | 周期漏练只记该日未完成，之后依正常节律，无倍量补练或能力下降判定。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 漏练后核对历史状态与下一次配额。 | TODO | 已确认 Q1（DEC-012）；功能证据 — |
-| V2-DAY-15 | §5.1、6.7、13.2 | 完成一次性任务默认不再排；只有合法巩固行动可重排且不改旧完成记录。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 普通日不复现；模拟已生效巩固后保留原完成时间。 | TODO | — |
-| V2-DAY-16 | §5.1、6.7、13.2 | 任务定义与每日实例独立，周期单日完成不等于长期完成或掌握。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 同一任务跨日生成独立 ID、状态和时间，复核不变成自动结业。 | TODO | — |
-| V2-DAY-17 | §6.7、9.1、9.2 | 历史实例保存当时任务内容或版本，后续变更不篡改历史。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 修改步骤后回看旧日仍看到旧步骤和原记录。 | TODO | — |
-| V2-DAY-18 | §9.1、9.2、13.2 | 保留初始计划与有效计划、每日编号／开始时间／实例／完成时间；刷新恢复进度和有效计划。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 初始与有效可并列核对，刷新和复读快照无损。 | TODO | — |
-| V2-DAY-19 | §9.3 | 保留 V1 进度、问答和资料，可继续用兼容视图。不补造 Day 和时长、不强制迁移。新项目使用 V2。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 迁移进行中和已结束的真实／旧 Mock 样本；失败保护原记录。 | TODO | 已确认 Q3（DEC-012）；功能证据 — |
-| V2-DAY-20 | §9.2、10.4 | 重复点击推进或重复完成时不重复创建学习日、实例或进度。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 双击、重复事件和延迟写入测试，仅一份有效结果。 | TODO | — |
-| V2-DAY-21 | §13.4 | 保留独立回看、已结束记录和引用，回看不推进当前学习。 | V2-P02 | `learningProgress.js`、日调度模块、`LearningView.jsx`、会话存储 | 打开旧任务、回到今日；核对进度与旧来源不变。 | TODO | 已确认 Q1（DEC-012）；功能证据 — |
+| V2-DAY-01 | §6.1、6.2、13.2 | 学习页默认今日任务，保留暖色风格及现有任务详情和引用。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 新计划落地 Day 1；今日为主视图，引用仍能打开原文。 | PASS | Edge 从真实图片导入直接进入 Day 1，步骤及答疑引用仍能打开并高亮原文片段。 |
+| V2-DAY-02 | §6.1 | 完整路线主动查看整体目标、当前阶段、完成的一次性任务、后续内容与持续练习。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 打开原侧栏依次核对五类信息，并回到今日焦点。 | PASS | Edge 默认收起，点击路线入口后显示整体目标、当前阶段、已完成一次性任务、后续内容和周期练习，可返回今日。 |
+| V2-DAY-03 | §6.2 | 展示主题、Day N、预计时长、完成进度及两类任务分组。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 混合日、只有一类、空日与已完成日均可用。 | PASS | 已确认 Q1（DEC-012）；Edge 验证混合日、仅一次性任务、必做完成与空日；learningDays.test.js 验证仅周期任务、预计时长及上限。 |
+| V2-DAY-04 | §6.2 | 当前任务详情、原文引用、答疑入口和下一日操作可用；存在教学调整时保留展示位。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 在桌面与手机打开各入口；调整内容由 V2-P05 联调。 | PARTIAL | Edge 验证任务详情、来源、已有任务的真实答疑与下日入口及 320px 布局。无任务的答疑由 V2-P03 接通，教学调整信息待 V2-P05 联调。 |
+| V2-DAY-05 | §6.3 | 调度纳入已满足启动条件且到期的周期练习。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 未启动、不应出现、应出现三类实例；同日去重。 | PASS | 已确认 Q1（DEC-012）；learningDays.test.js 区分未满足启动条件、Day 节律、真实 48 小时间隔及未到期；每项同日最多一个实例。 |
+| V2-DAY-06 | §6.3 | 按明确前置依赖纳入可做的一次性任务。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 未满足前置不会排入，独立任务仍可推进。 | PASS | 已确认 Q2（DEC-012）；learningDays.test.js 验证前置条件、自检及可独立执行的任务。 |
+| V2-DAY-07 | §6.3、6.6 | 保留仍需完成的一次性任务，仅在适合的学习日重排。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 跳过任务保持未完成，下个适合日出现，依赖不变。 | PASS | 已确认 Q1（DEC-012）；learningDays.test.js 保留未完成记录并在后续学习日重新排入，积压按最近安排顺序轮转。 |
+| V2-DAY-08 | §6.3 | 生效的调整参与组装，待确认和失败的调整不参与。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 给定三种变更状态，调度只消费生效版本。 | PARTIAL | learningDays.test.js 验证调度只消费 effectivePlan，待确认的模拟计划不进入今日。实际确认、失败和撤销后的集成待 V2-P04。 |
+| V2-DAY-09 | §6.3、13.2 | 默认每日 30 分钟、最多 5 项，可配置，无需填满。剩余配额内同日新解锁只能选学。避免欠项堆积并提供明确结束边界。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 多日积压后仍有明确定量边界和稳定选择顺序。 | PASS | 已确认 Q1（DEC-012）；learningDays.test.js 验证默认 30 分钟／5 项上限、可配置和不超额；Edge 完成一步后出现选学，必做分母保持 2。 |
+| V2-DAY-10 | §6.3、4.2 | 每日按已有计划、时长、顺序和调度纯程序组装。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 同一快照输出可重现，组装零模型调用。 | PASS | learningDays.test.js 用同一输入得到相同调度；Edge 单次分析后推进至 Day 3，由本地程序处理。 |
+| V2-DAY-11 | §6.4 | 由用户在任意时间主动推进，Day N 与自然日期分开并记录真实操作时间。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 同天跨数个 Day，历史时间仍真实；过午夜不自动刷新。 | PASS | 已确认 Q1（DEC-012）；learningDays.test.js 同自然日连续推进且保留真实操作时间，48 小时间隔不会因此缩短；Edge 由用户主动推进。 |
+| V2-DAY-12 | §6.5、13.2 | 允许未全部完成时推进，提示不阻断，独立任务照常。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 部分完成及一项未做均能继续，旧任务不会被补记已完成。 | PASS | Edge 验证当日有未完成任务仍能推进，未完成记录仍可回看；learningDays.test.js 验证一项未完成亦能继续。 |
+| V2-DAY-13 | §6.5 | 推进前保存本日完成情况与已存在的相关问答，封存旧日、推进编号并组装新日。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 刷新读到旧日记录与新日；迟到的问答仍归发送日（V2-P03 联调）。 | PASS | Edge 保存 Day 1 后显示 Day 2，延迟答复仍归原日、可刷新并从历史任务打开。项目级消息与观察去重由 V2-P03 验证。 |
+| V2-DAY-14 | §6.6 | 周期漏练只记该日未完成，之后依正常节律，无倍量补练或能力下降判定。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 漏练后核对历史状态与下一次配额。 | PASS | 已确认 Q1（DEC-012）；learningDays.test.js 验证漏练保留原状态且不补量；同一个周期任务在后续日只产生一个新实例。 |
+| V2-DAY-15 | §5.1、6.7、13.2 | 完成一次性任务默认不再排；只有合法巩固行动可重排且不改旧完成记录。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 普通日不复现；模拟已生效巩固后保留原完成时间。 | PARTIAL | learningDays.test.js 验证完成的一次性任务不再出现；注入已生效的独立巩固项有新 ID 且原完成时间保留。合法行动生成及执行器接入待 V2-P04。 |
+| V2-DAY-16 | §5.1、6.7、13.2 | 任务定义与每日实例独立，周期单日完成不等于长期完成或掌握。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 同一任务跨日生成独立 ID、状态和时间，复核不变成自动结业。 | PASS | learningDays.test.js 验证跨日练习拥有独立实例和进度；完成单次练习未计入一次性任务完成或掌握。 |
+| V2-DAY-17 | §6.7、9.1、9.2 | 历史实例保存当时任务内容或版本，后续变更不篡改历史。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 修改步骤后回看旧日仍看到旧步骤和原记录。 | PASS | learningDays.test.js 注入新有效计划后，旧实例保留原题名与完成时间，刷新仍使用独立快照；Edge 可回看并定位旧引用。 |
+| V2-DAY-18 | §9.1、9.2、13.2 | 保留初始计划与有效计划、每日编号／开始时间／实例／完成时间；刷新恢复进度和有效计划。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 初始与有效可并列核对，刷新和复读快照无损。 | PASS | learningDays.test.js 验证两套计划、学习日、完成时间、处理后的来源和消息恢复；Edge 验证刷新后回到实际学习日。 |
+| V2-DAY-19 | §9.3 | 保留 V1 进度、问答和资料，可继续用兼容视图。不补造 Day 和时长、不强制迁移。新项目使用 V2。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 迁移进行中和已结束的真实／旧 Mock 样本；失败保护原记录。 | PASS | 已确认 Q3（DEC-012）；Edge 注入合法 V1 后刷新恢复原任务；会话测试覆盖旧 Mock、进度、原始资料、问答、已完成态及损坏数据保护。V1 标签页不能覆盖 V2。 |
+| V2-DAY-20 | §9.2、10.4 | 重复点击推进或重复完成时不重复创建学习日、实例或进度。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 双击、重复事件和延迟写入测试，仅一份有效结果。 | PASS | learningDays.test.js 验证同日推进、开始与完成幂等；Edge 支持 Web Locks 时两个标签页同时推进只创建一个日。 |
+| V2-DAY-21 | §13.4 | 保留独立回看、已结束记录和引用，回看不推进当前学习。 | V2-P02 | `DailyLearningView.jsx`、`learningDays.js`、`useDailyLearning.js`、`learningSessionStorage.js` | 打开旧任务、回到今日；核对进度与旧来源不变。 | PASS | 已确认 Q1（DEC-012）；Edge 打开旧日任务、旧答疑引用，再返回今日；封存状态和实际学习日未改变。 |
 
 ## 观察与问答
 

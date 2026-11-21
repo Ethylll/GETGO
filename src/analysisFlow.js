@@ -14,22 +14,22 @@ export function createAnalysisBatch(materials) {
   })
 }
 
-export async function continueAnalysis({ sources, confirmPartial, clarification }, onStage, service = analysisService) {
-  const result = await service.planLearning({ sources, confirmPartial, clarification, onStage })
+export async function continueAnalysis({ sources, confirmPartial, clarification, planVersion }, onStage, service = analysisService) {
+  const result = await service.planLearning({ sources, confirmPartial, clarification, planVersion, onStage })
 
   if (result.status === 'needsClarification') {
-    return { phase: 'clarification', result, sources, confirmPartial }
+    return { phase: 'clarification', result, sources, confirmPartial, planVersion }
   }
 
   return { phase: result.status === 'ready' ? 'learning' : 'unavailable', result }
 }
 
-export async function startAnalysis(sources, onStage, service = analysisService) {
+export async function startAnalysis(sources, onStage, service = analysisService, planVersion) {
   await onStage('reading')
   const result = await service.readSources({ sources })
 
   if (result.status !== 'ready') return { phase: 'unavailable', result }
-  if (result.requiresConfirmation) return { phase: 'confirmation', result }
+  if (result.requiresConfirmation) return { phase: 'confirmation', result, planVersion }
 
-  return continueAnalysis({ sources: result.sources }, onStage, service)
+  return continueAnalysis({ sources: result.sources, planVersion }, onStage, service)
 }

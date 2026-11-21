@@ -1,6 +1,7 @@
-import { isValidLearningPlan } from './services/validateLearningPlan.js'
+import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidV2Task } from './services/validateLearningPlan.js'
 import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT } from './chatMessages.js'
 import { sourceText } from './learningSources.js'
+import { activeLearningPlan, snapshotDailyTask } from './learningDays.js'
 
 export const LEARNING_SESSION_KEY = 'getgo.learningSession'
 const SESSION_VERSION = 1
@@ -9,17 +10,21 @@ function isStringList(value) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
-function isValidSession({ plan, currentTaskId, completedTaskIds }) {
+function isValidStoredPlan(plan) {
   if (plan?.status !== 'ready' || !['mock', 'real'].includes(plan.mode) ||
     !isStringList(plan.coverageGaps) || !isStringList(plan.notices) || !isValidLearningPlan(plan, plan.sources)) {
     return false
   }
 
-  if (!plan.sources.every((source) => (
+  return plan.sources.every((source) => (
     typeof source.title === 'string' && ['text', 'image'].includes(source.type) &&
     ['processed', 'failed'].includes(source.status) &&
     [source.text, source.extractedText, source.error].every((value) => value === undefined || typeof value === 'string')
-  ))) return false
+  ))
+}
+
+function isValidSession({ plan, currentTaskId, completedTaskIds }) {
+  if (plan?.planVersion === 2 || !isValidStoredPlan(plan)) return false
 
   const taskIds = new Set(plan.tasks.map(({ id }) => id))
   if (!Array.isArray(completedTaskIds) || new Set(completedTaskIds).size !== completedTaskIds.length ||
@@ -31,17 +36,21 @@ function isValidSession({ plan, currentTaskId, completedTaskIds }) {
 
 const copyRefs = (refs) => refs?.map(({ sourceId, excerpt }) => ({ sourceId, excerpt }))
 
-function storedMessages(messages, plan) {
+function storedMessages(messages, plan, session) {
   if (!Array.isArray(messages)) return []
   const taskIds = new Set(plan.tasks.map(({ id }) => id))
   const evidence = new Map(plan.sources.filter((source) => source.status === 'processed').map((source) => [source.sourceId, sourceText(source)]))
   const ids = new Set()
   const result = []
+  const days = session && new Map(session.days.map((day) => [day.id, day]))
 
   for (const turn of messages) {
-    if (!turn || typeof turn.id !== 'string' || !turn.id || ids.has(turn.id) || !taskIds.has(turn.taskId) ||
+    if (!turn || typeof turn.id !== 'string' || !turn.id || ids.has(turn.id) ||
       typeof turn.question !== 'string' || !turn.question.trim() || turn.question.length > QUESTION_LIMIT ||
       !Number.isFinite(turn.createdAt)) continue
+    const day = days?.get(turn.dayId)
+    if (session ? turn.projectId !== session.projectId ||
+      !day?.instances.some(({ id, task }) => id === turn.instanceId && task.id === turn.taskId) : !taskIds.has(turn.taskId)) continue
 
     const status = turn.status === 'pending' ? 'interrupted' : turn.status
     let answer = ''
@@ -56,7 +65,8 @@ function storedMessages(messages, plan) {
 
     ids.add(turn.id)
     const { id, taskId, question, createdAt } = turn
-    result.push({ id, taskId, question, createdAt, status, answer, citations })
+    result.push({ id, taskId, question, createdAt, status, answer, citations,
+      ...(session ? { projectId: turn.projectId, dayId: turn.dayId, instanceId: turn.instanceId } : {}) })
   }
   return result
 }
@@ -66,17 +76,79 @@ function toStoredPlan(plan) {
 
   return {
     status, mode, topic, supportedScope, coverageGaps, entryTaskId, notices,
+    ...(plan.planVersion === 2 ? { planVersion: 2 } : {}),
     sources: plan.sources.map(({ sourceId, title, type, status, text, extractedText, error }) => (
       { sourceId, title, type, status, text, extractedText, error }
     )),
     knowledgePoints: plan.knowledgePoints.map(({ id, title, prerequisiteIds, sourceRefs }) => (
       { id, title, prerequisiteIds, sourceRefs: copyRefs(sourceRefs) }
     )),
-    tasks: plan.tasks.map(({ id, title, objective, prerequisiteTaskIds, knowledgePointIds, steps, sourceRefs }) => ({
+    tasks: plan.planVersion === 2 ? plan.tasks.map(snapshotDailyTask) : plan.tasks.map(({ id, title, objective, prerequisiteTaskIds, knowledgePointIds, steps, sourceRefs }) => ({
       id, title, objective, prerequisiteTaskIds, knowledgePointIds,
       steps: steps.map(({ text, sourceRefs }) => ({ text, sourceRefs: copyRefs(sourceRefs) })),
       sourceRefs: copyRefs(sourceRefs),
     })),
+  }
+}
+
+function validLimits(limits) {
+  return Number.isSafeInteger(limits?.minutes) && limits.minutes > 0 && Number.isSafeInteger(limits.tasks) && limits.tasks > 0
+}
+
+function validInstance(item, day, evidence) {
+  const task = item?.task
+  if (typeof task?.id !== 'string' || !task.id || item.id !== `${day.id}:${task.id}` ||
+    typeof task.title !== 'string' || !task.title.trim() || typeof task.objective !== 'string' || !task.objective.trim() ||
+    !isStringList(task.prerequisiteTaskIds) || !isStringList(task.knowledgePointIds) || !task.knowledgePointIds.length ||
+    !Array.isArray(task.steps) || task.steps.length < 2 || task.steps.length > 5 || !hasValidSourceRefs(task.sourceRefs, evidence) ||
+    !task.steps.every((step) => typeof step?.text === 'string' && step.text.trim() && hasValidSourceRefs(step.sourceRefs, evidence)) ||
+    !isValidV2Task(task, task.prerequisiteTaskIds.filter((id) => task.prerequisiteGates?.some((gate) => gate?.taskId === id)), evidence) ||
+    typeof item.optional !== 'boolean' || !isStringList(item.feedback)) return false
+  const withinDay = (time) => Number.isFinite(time) && time >= day.startedAt && (day.endedAt === null || time <= day.endedAt)
+  if (item.status === 'notStarted') return item.startedAt === null && item.completedAt === null && !item.feedback.length
+  if (!withinDay(item.startedAt)) return false
+  if (item.status === 'inProgress') return item.completedAt === null && !item.feedback.length
+  return item.status === 'completed' && withinDay(item.completedAt) && item.completedAt >= item.startedAt
+}
+
+function validDailySession(session) {
+  const { plan, effectivePlan, projectId, revision, limits, days } = session
+  if (plan?.planVersion !== 2 || !isValidStoredPlan(plan) || typeof projectId !== 'string' || !projectId ||
+    !Number.isSafeInteger(revision) || revision < 0 || !validLimits(limits) || !Array.isArray(days) || !days.length) return false
+  if (effectivePlan !== null && (effectivePlan?.planVersion !== 2 ||
+    !isValidStoredPlan({ ...effectivePlan, sources: plan.sources }))) return false
+  const evidence = indexSourceEvidence(plan.sources)
+  return days.every((day, index) => {
+    if (day?.id !== `day-${index + 1}` || day.dayNumber !== index + 1 || !Number.isFinite(day.startedAt) || day.startedAt < 0 ||
+      (index > 0 && day.startedAt !== days[index - 1].endedAt) ||
+      (index === days.length - 1 ? day.endedAt !== null : !Number.isFinite(day.endedAt) || day.endedAt < day.startedAt) ||
+      !validLimits(day.limits) || !Array.isArray(day.instances) || day.instances.length > day.limits.tasks ||
+      !day.instances.every((item) => validInstance(item, day, evidence))) return false
+    return new Set(day.instances.map(({ id }) => id)).size === day.instances.length &&
+      day.instances.reduce((sum, { task }) => sum + task.estimatedMinutes, 0) <= day.limits.minutes
+  })
+}
+
+export function saveDailyLearningSession(session, storage) {
+  try {
+    if (!validDailySession(session)) return false
+    const plan = toStoredPlan(session.plan)
+    const effective = session.effectivePlan && toStoredPlan({ ...session.effectivePlan, sources: plan.sources })
+    const { projectId, revision, limits, days } = session
+    const snapshot = { version: 2, projectId, revision, limits, plan, effectivePlan: effective && { ...effective, sources: undefined },
+      days: days.map(({ id, dayNumber, startedAt, endedAt, limits: dayLimits, instances }) => ({
+        id, dayNumber, startedAt, endedAt, limits: dayLimits,
+        instances: instances.map(({ id: instanceId, task, status, startedAt: start, completedAt, optional, feedback }) => ({
+          id: instanceId, task: snapshotDailyTask(task), status, startedAt: start, completedAt, optional, feedback,
+        })),
+      })),
+      messages: storedMessages(session.messages, plan, session),
+    }
+    const target = storage ?? globalThis.localStorage
+    target.setItem(LEARNING_SESSION_KEY, JSON.stringify(snapshot))
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -93,6 +165,11 @@ export function loadLearningSession(storage) {
   try {
     const snapshot = JSON.parse(raw)
     if (!snapshot || typeof snapshot !== 'object') return { status: 'invalid', reason: 'data' }
+    if (snapshot.version === 2) {
+      if (!validDailySession(snapshot)) return { status: 'invalid', reason: 'data' }
+      const session = { ...snapshot, messages: storedMessages(snapshot.messages, snapshot.plan, snapshot) }
+      return { status: 'restored', plan: activeLearningPlan(session), session }
+    }
     if (snapshot.version !== SESSION_VERSION) return { status: 'invalid', reason: 'version' }
     if (!isValidSession(snapshot)) return { status: 'invalid', reason: 'data' }
 
@@ -112,6 +189,8 @@ export function saveLearningSession(plan, { currentTaskId, completedTaskIds, mes
     const history = storedMessages(messages, plan)
     if (history.length) snapshot.messages = history
     const target = storage ?? globalThis.localStorage
+    const existing = target.getItem?.(LEARNING_SESSION_KEY)
+    if (existing && JSON.parse(existing)?.version === 2) return false
     target.setItem(LEARNING_SESSION_KEY, JSON.stringify(snapshot))
     return true
   } catch {

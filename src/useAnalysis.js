@@ -30,16 +30,16 @@ export function useAnalysis() {
     const batch = createAnalysisBatch(materials)
     return run((onStage) => {
       setSourceFiles(new Map(batch.filter(({ file }) => file).map(({ sourceId, file }) => [sourceId, file])))
-      return startAnalysis(batch, onStage)
+      return startAnalysis(batch, onStage, undefined, 2)
     })
   }
 
   function confirmPartial() {
-    return run((onStage) => continueAnalysis({ sources: analysis.result.sources, confirmPartial: true }, onStage))
+    return run((onStage) => continueAnalysis({ sources: analysis.result.sources, confirmPartial: true, planVersion: analysis.planVersion }, onStage))
   }
 
   function clarify(clarification) {
-    return run((onStage) => continueAnalysis({ sources: analysis.sources, confirmPartial: analysis.confirmPartial, clarification }, onStage))
+    return run((onStage) => continueAnalysis({ ...analysis, clarification }, onStage))
   }
 
   function returnToImport() {

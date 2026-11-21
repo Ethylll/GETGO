@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import AnalysisView from './AnalysisView.jsx'
+import DailyLearningView from './DailyLearningView.jsx'
 import LearningView from './LearningView.jsx'
 import MaterialList from './MaterialList.jsx'
 import { clearLearningSession, loadLearningSession } from './learningSessionStorage.js'
@@ -193,7 +194,9 @@ export default function App() {
           {importPage}
         </>
       )}
-      {plan && <LearningView plan={plan} sourceFiles={sourceFiles} initialProgress={restored?.progress} initialMessages={restored?.messages} />}
+      {plan?.planVersion === 2
+        ? <DailyLearningView initialPlan={plan} sourceFiles={sourceFiles} restored={restored?.session} />
+        : plan && <LearningView plan={plan} sourceFiles={sourceFiles} initialProgress={restored?.progress} initialMessages={restored?.messages} />}
       {analysis && analysis.phase !== 'learning' && (
         <AnalysisView analysis={analysis} onConfirm={confirmPartial} onClarify={clarify} onBack={returnToImport} />
       )}
