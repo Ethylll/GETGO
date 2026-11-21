@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { fuseRetrieval, insufficient, prepareRetrieval } from '../server/chatRag.js'
 import { composeAnswer, validateClaims } from '../server/chatClaims.js'
-import { QUESTION_LIMIT } from '../src/chatMessages.js'
+import { QUESTION_LIMIT, validatedLearningFeedback } from '../src/chatMessages.js'
 
 const ENDPOINT = 'https://api.deepseek.com/chat/completions'
 const DEFAULT_MODEL = 'deepseek-flash'
@@ -49,11 +49,13 @@ async function readBody(request) {
 }
 
 function normalizeInput(body) {
-  const { topic, task, question, sources, history = [] } = body ?? {}
-  if (!within(topic, 160) || !within(question, QUESTION_LIMIT) || !within(task?.id, 100) || !within(task.title, 240) ||
+  const { topic, task, question, sources, history = [], scope = 'task', observeLearning = false, priorFeedback = [] } = body ?? {}
+  if (!within(topic, 160) || !within(question, QUESTION_LIMIT) || !['task', 'project'].includes(scope) ||
+    typeof observeLearning !== 'boolean' || !Array.isArray(sources) || sources.length > 10 ||
+    !Array.isArray(history) || history.length > 4 || !Array.isArray(priorFeedback) || priorFeedback.length > 4) return null
+  if (scope === 'project' ? task !== null : (!within(task?.id, 100) || !within(task.title, 240) ||
     !Array.isArray(task.steps) || task.steps.length > 5 || !task.steps.every((step) => within(step, 350)) ||
-    !Array.isArray(task.sourceIds) || task.sourceIds.length > 10 || !task.sourceIds.every((id) => within(id, 100)) ||
-    !Array.isArray(sources) || sources.length > 10 || !Array.isArray(history) || history.length > 4) return null
+    !Array.isArray(task.sourceIds) || task.sourceIds.length > 10 || !task.sourceIds.every((id) => within(id, 100)))) return null
 
   let length = 0
   const byId = new Map()
@@ -68,11 +70,17 @@ function normalizeInput(body) {
     byId.set(sourceId, { sourceId, title, type, status, [type === 'text' ? 'text' : 'extractedText']: text })
   }
 
-  const taskHistory = history.filter((turn) => turn?.taskId === task.id && within(turn.question, QUESTION_LIMIT) && within(turn.answer, 600))
+  const taskId = task?.id ?? null
+  const taskHistory = history.filter((turn) => turn?.taskId === taskId && within(turn.question, QUESTION_LIMIT) && within(turn.answer, 600))
     .map(({ question, answer }) => ({ question, answer }))
+  const feedbackHistory = priorFeedback.flatMap((item) => {
+    if (item?.taskId !== taskId || !within(item.question, QUESTION_LIMIT)) return []
+    const feedback = validatedLearningFeedback(item.question, item)
+    return feedback ? [{ ...feedback, question: item.question }] : []
+  })
   return {
-    topic, question: question.trim(), sources: [...byId.values()], history: taskHistory,
-    task: { id: task.id, title: task.title, steps: task.steps, sourceIds: task.sourceIds.filter((id) => byId.has(id)) },
+    topic, question: question.trim(), sources: [...byId.values()], history: taskHistory, observeLearning, feedbackHistory,
+    task: task && { id: task.id, title: task.title, steps: task.steps, sourceIds: task.sourceIds.filter((id) => byId.has(id)) },
   }
 }
 
@@ -97,13 +105,15 @@ export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.
     if (payload.tooLarge || input?.tooLarge) return error('资料内容超过本次答疑的长度限制。', 413)
     if (!input) return error('答疑请求无效，请检查问题长度和学习资料。', 400)
 
-    const { question, topic, task, sources, history } = input
+    const { question, topic, task, sources, history, observeLearning, feedbackHistory } = input
     const { candidates, lexical } = prepareRetrieval(input)
     const requestId = randomUUID()
     const record = (reason, details = {}) => report({ requestId, reason, ...details })
+    let feedback = null
+    const withFeedback = (response) => feedback ? { ...response, feedback } : response
     const decline = (reason) => {
       record(reason)
-      return json(insufficient())
+      return json(withFeedback(insufficient()))
     }
     if (!candidates.length) return decline('no_searchable_sources')
     const key = env.DEEPSEEK_API_KEY?.trim()
@@ -146,19 +156,24 @@ export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.
           ],
         }),
       })
-      if (!response.ok) return { failure: error('DeepSeek 暂时无法提供答疑，请稍后重试。', 502) }
+      if (!response.ok) return { failure: modelFailure('DeepSeek 暂时无法提供答疑，请稍后重试。', 502) }
 
       const choice = (await response.json()).choices?.[0]
       if (choice?.finish_reason !== 'stop' || typeof choice.message?.content !== 'string') {
-        return { failure: error('DeepSeek 返回了不完整的答疑结果，请重试。', 502) }
+        return { failure: modelFailure('DeepSeek 返回了不完整的答疑结果，请重试。', 502) }
       }
       return { output: JSON.parse(choice.message.content) }
     }
 
+    function modelFailure(message, status) {
+      return json(withFeedback({ status: 'error', answer: '', citations: [], message }), status)
+    }
+
     let stage = 'retrieval'
     try {
-      const frame = { topic, question, task: task.title, history }
-      const ranked = await complete(retrievalPrompt, { ...frame, candidates: candidates.map(modelChunk) }, 800)
+      const frame = { topic, question, task: task?.title ?? null, history }
+      const ranked = await complete(retrievalPrompt, { ...frame, observeLearning,
+        ...(observeLearning ? { priorFeedback: feedbackHistory } : {}), candidates: candidates.map(modelChunk) }, 800)
       if (ranked.failure) {
         record('upstream_error', { stage })
         return ranked.failure
@@ -167,6 +182,9 @@ export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.
         !ranked.output.matches.every((match) => typeof match?.chunkId === 'string' && [0, 1, 2, 3].includes(match.relevance))) {
         throw new Error('invalid ranking')
       }
+      const priorIndex = ranked.output.feedback?.sameAsPrior
+      const isRepeated = Number.isInteger(priorIndex) && priorIndex >= 0 && priorIndex < feedbackHistory.length
+      if (observeLearning && !isRepeated) feedback = validatedLearningFeedback(question, ranked.output.feedback)
       const retrieval = fuseRetrieval(candidates, ranked.output.matches)
       record('retrieval', {
         candidates: candidates.length,
@@ -207,12 +225,12 @@ export function createChatHandler({ fetchImpl = globalThis.fetch, env = process.
       if (answer.status === 'insufficient') return decline('no_semantically_supported_claims')
       record('answer', { status: answer.status, reviewed: claims.length, citationCount: answer.citations.length,
         unsupported: review.verdicts.filter(({ verdict }) => verdict === 'unsupported').length })
-      return json(answer)
+      return json(withFeedback(answer))
     } catch {
       record(controller.signal.aborted ? 'timeout' : 'upstream_or_protocol_error', { stage })
       return controller.signal.aborted
-        ? error('DeepSeek 答疑超时，请重试。', 504)
-        : error('DeepSeek 响应异常或格式无效，请重试。', 502)
+        ? modelFailure('DeepSeek 答疑超时，请重试。', 504)
+        : modelFailure('DeepSeek 响应异常或格式无效，请重试。', 502)
     } finally {
       clearTimeout(timer)
     }

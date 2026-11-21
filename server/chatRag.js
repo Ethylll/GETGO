@@ -84,8 +84,8 @@ function matchFeatures(query, indexed) {
 
 export function prepareRetrieval({ question, task, sources, history }) {
   const queries = questionQueries(question, history)
-  const context = searchFeatures([task.title, ...task.steps].join(' '))
-  const preferred = new Set(task.sourceIds)
+  const context = searchFeatures(task ? [task.title, ...task.steps].join(' ') : '')
+  const preferred = new Set(task?.sourceIds)
   const chunks = splitSources(sources).map((chunk) => {
     const indexed = searchFeatures(chunk.text)
     const matches = queries.map((query) => matchFeatures(query, indexed))

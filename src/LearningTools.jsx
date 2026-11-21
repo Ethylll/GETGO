@@ -105,7 +105,7 @@ export default function LearningTools({ tools, plan, sourceFiles, isRestored, ro
             <h2 className="mb-2 font-semibold text-ink">{label}</h2>
             {id === 'route' ? route : id === 'sources' ? (
               openPanel === id && <SourcesPanel sources={sources} files={sourceFiles} relatedTasks={relatedTasks} selectedId={selectedSourceId} error={sourceError} onOpen={openSource} mock={plan.mode === 'mock'} imageUnavailableMessage={imageUnavailableMessage} />
-            ) : <ChatPanel key={chat.task?.id ?? 'no-task'} {...chat} sources={sources} onOpenSource={openSource} visible={openPanel === id} />}
+            ) : <ChatPanel key={chat.scopeKey ?? chat.task?.id ?? 'no-task'} {...chat} sources={sources} onOpenSource={openSource} visible={openPanel === id} />}
           </div>
         ))}
       </aside>

@@ -22,7 +22,7 @@ export default function LearningView({ plan, sourceFiles, initialProgress, initi
   const tools = useLearningTools(plan)
   const { routeButton, setOpenPanel, sources, openSource } = tools
   const [saveFailed, setSaveFailed] = useState(false)
-  const { messages, pendingTaskId, sendQuestion } = useLearningChat(plan, initialMessages)
+  const { messages, pendingKey, sendQuestion } = useLearningChat(plan, initialMessages)
   const lastSave = useRef(initialProgress ? { plan, ...initialProgress, messages } : null)
   const heading = useRef(null)
   const lastCompleteClick = useRef(-Infinity)
@@ -144,7 +144,7 @@ export default function LearningView({ plan, sourceFiles, initialProgress, initi
       </article>
 
       <LearningTools tools={tools} plan={plan} sourceFiles={sourceFiles} isRestored={Boolean(initialProgress)}
-        chat={{ task, canAsk: Boolean(task && task.id === currentTaskId), messages, pendingTaskId, onSend: sendQuestion }}
+        chat={{ task, canAsk: Boolean(task && task.id === currentTaskId), messages, pendingKey, onSend: sendQuestion }}
         route={(
               <>
                 <p className="mb-2 text-xs tabular-nums">已完成 {completedTaskIds.length} / {tasks.length} 项</p>

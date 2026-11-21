@@ -1,7 +1,8 @@
 import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidV2Task } from './services/validateLearningPlan.js'
-import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT } from './chatMessages.js'
+import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT, validatedLearningFeedback } from './chatMessages.js'
 import { sourceText } from './learningSources.js'
 import { activeLearningPlan, snapshotDailyTask } from './learningDays.js'
+import { storedObservations } from './learningObservation.js'
 
 export const LEARNING_SESSION_KEY = 'getgo.learningSession'
 const SESSION_VERSION = 1
@@ -49,8 +50,11 @@ function storedMessages(messages, plan, session) {
       typeof turn.question !== 'string' || !turn.question.trim() || turn.question.length > QUESTION_LIMIT ||
       !Number.isFinite(turn.createdAt)) continue
     const day = days?.get(turn.dayId)
-    if (session ? turn.projectId !== session.projectId ||
-      !day?.instances.some(({ id, task }) => id === turn.instanceId && task.id === turn.taskId) : !taskIds.has(turn.taskId)) continue
+    if (session) {
+      if (turn.projectId !== session.projectId || !day) continue
+      const projectQuestion = turn.taskId === null && (turn.instanceId ?? null) === null
+      if (!projectQuestion && !day.instances.some(({ id, task }) => id === turn.instanceId && task.id === turn.taskId)) continue
+    } else if (!taskIds.has(turn.taskId)) continue
 
     const status = turn.status === 'pending' ? 'interrupted' : turn.status
     let answer = ''
@@ -65,8 +69,10 @@ function storedMessages(messages, plan, session) {
 
     ids.add(turn.id)
     const { id, taskId, question, createdAt } = turn
+    const feedback = session && validatedLearningFeedback(question, turn.feedback)
     result.push({ id, taskId, question, createdAt, status, answer, citations,
-      ...(session ? { projectId: turn.projectId, dayId: turn.dayId, instanceId: turn.instanceId } : {}) })
+      ...(session ? { projectId: turn.projectId, dayId: turn.dayId, instanceId: turn.instanceId ?? null } : {}),
+      ...(feedback ? { feedback } : {}) })
   }
   return result
 }
@@ -135,6 +141,7 @@ export function saveDailyLearningSession(session, storage) {
     const plan = toStoredPlan(session.plan)
     const effective = session.effectivePlan && toStoredPlan({ ...session.effectivePlan, sources: plan.sources })
     const { projectId, revision, limits, days } = session
+    const messages = storedMessages(session.messages, plan, session)
     const snapshot = { version: 2, projectId, revision, limits, plan, effectivePlan: effective && { ...effective, sources: undefined },
       days: days.map(({ id, dayNumber, startedAt, endedAt, limits: dayLimits, instances }) => ({
         id, dayNumber, startedAt, endedAt, limits: dayLimits,
@@ -142,7 +149,7 @@ export function saveDailyLearningSession(session, storage) {
           id: instanceId, task: snapshotDailyTask(task), status, startedAt: start, completedAt, optional, feedback,
         })),
       })),
-      messages: storedMessages(session.messages, plan, session),
+      messages, observations: storedObservations(session.observations, new Set(days.map(({ id }) => id)), messages),
     }
     const target = storage ?? globalThis.localStorage
     target.setItem(LEARNING_SESSION_KEY, JSON.stringify(snapshot))
@@ -167,7 +174,9 @@ export function loadLearningSession(storage) {
     if (!snapshot || typeof snapshot !== 'object') return { status: 'invalid', reason: 'data' }
     if (snapshot.version === 2) {
       if (!validDailySession(snapshot)) return { status: 'invalid', reason: 'data' }
-      const session = { ...snapshot, messages: storedMessages(snapshot.messages, snapshot.plan, snapshot) }
+      const messages = storedMessages(snapshot.messages, snapshot.plan, snapshot)
+      const session = { ...snapshot, messages,
+        observations: storedObservations(snapshot.observations, new Set(snapshot.days.map(({ id }) => id)), messages) }
       return { status: 'restored', plan: activeLearningPlan(session), session }
     }
     if (snapshot.version !== SESSION_VERSION) return { status: 'invalid', reason: 'version' }

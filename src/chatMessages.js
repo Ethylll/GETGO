@@ -12,6 +12,31 @@ export const chatStatusText = {
 
 export const isEvidenceAnswer = (status) => ['answered', 'partial', 'conflict'].includes(status)
 
+export function validatedLearningFeedback(question, feedback) {
+  const excerpt = feedback?.excerpt
+  if (!['difficulty', 'time', 'direction', 'selfAssessment'].includes(feedback?.kind) ||
+    typeof excerpt !== 'string' || excerpt.length < 2 || excerpt.length > 180 ||
+    excerpt.trim() !== excerpt || !question.includes(excerpt)) return null
+  return { kind: feedback.kind, excerpt }
+}
+
+export function chatScopeKey(taskId, context) {
+  return context ? context.instanceId ?? context.dayId : taskId
+}
+
+export function scopedChatTurns(messages, taskId, context) {
+  return messages.filter((message) => message.taskId === taskId && (!context ||
+    message.projectId === context.projectId && message.dayId === context.dayId &&
+    (message.instanceId ?? null) === (context.instanceId ?? null)))
+}
+
+export function updateScopedChatMessages(session, context, update) {
+  if (session.projectId !== context.projectId || !session.days.some(({ id, instances }) => id === context.dayId &&
+    (context.instanceId === null || instances.some((item) => item.id === context.instanceId)))) return session
+  const messages = update(session.messages)
+  return messages === session.messages ? session : { ...session, messages, revision: session.revision + 1 }
+}
+
 export function taskChatHistory(messages, taskId) {
   return messages.filter((message) => message.taskId === taskId && isEvidenceAnswer(message.status)).slice(-4)
     .map(({ taskId, question, answer }) => ({ taskId, question, answer: answer.slice(0, 600) }))

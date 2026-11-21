@@ -42,6 +42,60 @@ function mock({ rerank, tutor, verify } = {}) {
   return { handler, calls, diagnostic }
 }
 
+test('无任务的项目答疑可检索和追问，旧任务对话不进入请求', async () => {
+  const { handler, calls } = mock()
+  const payload = input({ scope: 'project', task: null, observeLearning: true,
+    history: [{ taskId: task.id, question: '旧任务上下文', answer: '旧任务答复' },
+      { taskId: null, question: '怎样抱住吉他？', answer: '让乐器贴近身体。' }],
+    priorFeedback: [{ taskId: task.id, kind: 'difficulty', excerpt: '这项任务太难', question: '这项任务太难，我没办法开始。' },
+      { taskId: null, kind: 'time', excerpt: '我只有五分钟', question: '今天我只有五分钟。' }],
+  })
+  const reply = await (await send(handler, payload)).json()
+  assert.equal(reply.status, 'answered')
+  assert.equal(reply.citations[0].excerpt, fixtures.sources.hold)
+  assert.equal(calls[0].data.task, null)
+  assert.deepEqual(calls[0].data.history, [{ question: '怎样抱住吉他？', answer: '让乐器贴近身体。' }])
+  assert.equal(calls[0].data.observeLearning, true)
+  assert.deepEqual(calls[0].data.priorFeedback, [{ kind: 'time', excerpt: '我只有五分钟', question: '今天我只有五分钟。' }])
+  assert.equal(calls[1].data.priorFeedback, undefined)
+  assert.equal(calls.length, 3)
+  assert.equal((await send(handler, { ...payload, task })).status, 400)
+})
+
+test('在现有检索调用中提取逐字用户反馈，独立于是否有答疑依据，无额外模型调用', async () => {
+  const feedback = { kind: 'time', excerpt: '我每天没有时间做这么多' }
+  const { handler, calls, diagnostic } = mock({ rerank: () => ({ matches: [], feedback }) })
+  const payload = input({ question: `这个计划太重了，${feedback.excerpt}。`, observeLearning: true })
+  const supported = await (await send(handler, payload)).json()
+  assert.equal(supported.status, 'insufficient')
+  assert.deepEqual(supported.feedback, feedback)
+  assert.deepEqual(calls.map(({ stage }) => stage), ['retrieval'])
+  assert.ok(!JSON.stringify(diagnostic).includes(feedback.excerpt))
+  for (const guarded of [{ question: '这是普通提问' }, { observeLearning: false }]) {
+    assert.equal((await (await send(handler, { ...payload, ...guarded })).json()).feedback, undefined)
+  }
+})
+
+test('检索完成后答疑上游出错时仍保存已识别的合法反馈', async () => {
+  const feedback = { kind: 'difficulty', excerpt: '我实际做了还是跟不上' }
+  const { handler, calls } = mock({ rerank: (candidates) => ({ ...select(candidates), feedback }), tutor: () => 'invalid JSON' })
+  const reply = await send(handler, input({ observeLearning: true, question: feedback.excerpt }))
+  assert.equal(reply.status, 502)
+  assert.deepEqual((await reply.json()).feedback, feedback)
+  assert.equal(calls.length, 2)
+})
+
+test('已识别为旧反馈的本轮重述不返回新信号', async () => {
+  const excerpt = '我每天只能腾出五分钟'
+  const { handler, calls } = mock({ rerank: () => ({ matches: [], feedback: { kind: 'time', excerpt, sameAsPrior: 0 } }) })
+  const result = await (await send(handler, input({ observeLearning: true, question: excerpt,
+    priorFeedback: [{ taskId: task.id, question: '我每天只有五分钟', kind: 'time', excerpt: '每天只有五分钟' }],
+  }))).json()
+  assert.equal(result.status, 'insufficient')
+  assert.equal(result.feedback, undefined)
+  assert.equal(calls.length, 1)
+})
+
 test('自然语言正文通过完整三阶段，精确引用和安全诊断字段被保留', async () => {
   const { handler, calls, diagnostic } = mock()
   const reply = await (await send(handler, input({ model: 'invalid', endpoint: 'http://invalid' }))).json()

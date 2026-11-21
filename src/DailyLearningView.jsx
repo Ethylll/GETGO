@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { chatScopeKey, scopedChatTurns } from './chatMessages.js'
 import { activeLearningPlan, feedbackCriteria, getOneTimeProgress } from './learningDays.js'
 import LearningTools, { LearningSteps, References, useLearningTools } from './LearningTools.jsx'
 import { useDailyLearning } from './useDailyLearning.js'
@@ -82,12 +83,13 @@ function TaskDetail({ task, instance, criteria, tools, onAction, isReviewing }) 
   )
 }
 
-function DailyRoute({ plan, day, days, done, focusedId, onTask, onHistory }) {
+function DailyRoute({ plan, day, days, done, focusedId, projectQuestionDays, onTask, onHistory, onProjectHistory }) {
   const phase = day.instances.find(({ status, optional }) => status !== 'completed' && !optional)?.task.title
   return (
     <div className="max-h-[65vh] space-y-3 overflow-y-auto">
       <p><strong>整体目标</strong> · {plan.topic}。{plan.supportedScope}</p>
       <p><strong>当前阶段</strong> · Day {day.dayNumber}{phase ? ` · ${phase}` : ' · 可查看后续安排'}</p>
+      {projectQuestionDays.has(day.id) && <button type="button" className="text-left underline" onClick={() => onProjectHistory(day)}>查看本日项目答疑</button>}
       {[
         ['已完成的一次性任务', plan.tasks.filter(({ type, id }) => type === 'oneTime' && done.has(id))],
         ['后续学习内容', plan.tasks.filter(({ type, id }) => type === 'oneTime' && !done.has(id))],
@@ -109,8 +111,11 @@ function DailyRoute({ plan, day, days, done, focusedId, onTask, onHistory }) {
           {[...days.slice(0, -1)].reverse().map((record) => (
             <details key={record.id} className="mt-1 border-t border-line py-1">
               <summary className="cursor-pointer">Day {record.dayNumber} · 完成 {record.instances.filter(({ status }) => status === 'completed').length}/{record.instances.length}</summary>
+              {projectQuestionDays.has(record.id) && <button type="button" className="text-left underline" onClick={() => onProjectHistory(record)}>
+                查看 Day {record.dayNumber} 项目答疑
+              </button>}
               {record.instances.length ? <ul>{record.instances.map((item) => (
-                <li key={item.id}><button type="button" className="text-left underline" onClick={() => onHistory(item, record.dayNumber)}>
+                <li key={item.id}><button type="button" className="text-left underline" onClick={() => onHistory(item, record)}>
                   {item.task.title} · {item.status === 'completed' ? '已完成' : '未完成'}
                 </button></li>
               ))}</ul> : <p className="text-xs">该日没有安排任务</p>}
@@ -126,7 +131,7 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
   const { session, storageStatus, dispatch, updateMessages } = useDailyLearning(initialPlan, restored)
   const plan = activeLearningPlan(session)
   const tools = useLearningTools(plan)
-  const { messages, pendingTaskId, sendQuestion } = useLearningChat(plan, undefined, { messages: session.messages, updateMessages })
+  const { messages, pendingKey, sendQuestion } = useLearningChat(plan, undefined, { messages: session.messages, updateMessages })
   const [selectedId, setSelectedId] = useState(null)
   const [review, setReview] = useState(null)
   const [transition, setTransition] = useState('')
@@ -138,8 +143,11 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
   const minutes = day.instances.reduce((sum, { task }) => sum + task.estimatedMinutes, 0)
   const focused = day.instances.find(({ id }) => id === selectedId) ??
     required.find(({ status }) => status === 'inProgress') ?? required.find(({ status }) => status === 'notStarted')
-  const task = review?.task ?? focused?.task
+  const task = review ? review.task : focused?.task
   const activeInstance = review ? review.instance : focused
+  const chatContext = { projectId: session.projectId, dayId: review ? review.dayId : day.id, instanceId: activeInstance?.id ?? null }
+  const chatTaskId = task?.id ?? null
+  const projectQuestionDays = new Set(messages.filter(({ taskId }) => taskId === null).map(({ dayId }) => dayId))
 
   function select(id) {
     setReview(null)
@@ -153,14 +161,19 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
       const completedDay = session.days.find((record) => record.instances.some(
         ({ task, status }) => task.id === definition.id && status === 'completed' && task.type === 'oneTime'))
       const instance = completedDay?.instances.find(({ task, status }) => task.id === definition.id && status === 'completed')
-      setReview(instance ? { task: instance.task, instance, dayNumber: completedDay.dayNumber } : { task: definition })
+      setReview(instance ? { task: instance.task, instance, dayId: completedDay.id, dayNumber: completedDay.dayNumber } : { task: definition })
     }
     tools.setOpenPanel(null)
   }
 
-  function openHistory(instance, dayNumber) {
-    setReview({ task: instance.task, instance, dayNumber })
+  function openHistory(instance, record) {
+    setReview({ task: instance.task, instance, dayId: record.id, dayNumber: record.dayNumber })
     tools.setOpenPanel(null)
+  }
+
+  function openProjectHistory(record) {
+    setReview(record.id === day.id && !focused ? null : { dayId: record.id, dayNumber: record.dayNumber })
+    tools.setOpenPanel('qa')
   }
 
   function changeTask(type, instanceId, feedback) {
@@ -217,9 +230,11 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
         </footer>
       </article>
       <LearningTools tools={tools} plan={plan} sourceFiles={sourceFiles} isRestored={Boolean(restored)}
-        route={<DailyRoute plan={plan} day={day} days={session.days} done={done} onTask={openTask} onHistory={openHistory} focusedId={focused?.id} />}
-        chat={{ task, canAsk: !review && Boolean(focused), messages: messages.filter((message) => message.instanceId === activeInstance?.id), pendingTaskId,
-          onSend: (selectedTask, draft) => sendQuestion(selectedTask, draft, { projectId: session.projectId, dayId: day.id, instanceId: focused?.id }) }} />
+        route={<DailyRoute plan={plan} day={day} days={session.days} done={done} onTask={openTask} onHistory={openHistory}
+          projectQuestionDays={projectQuestionDays} onProjectHistory={openProjectHistory} focusedId={focused?.id} />}
+        chat={{ task, canAsk: !review, dayNumber: review ? review.dayNumber : day.dayNumber,
+          scopeKey: chatScopeKey(chatTaskId, chatContext), messages: scopedChatTurns(messages, chatTaskId, chatContext), pendingKey,
+          onSend: (selectedTask, draft) => sendQuestion(selectedTask, draft, chatContext) }} />
     </div>
   )
 }

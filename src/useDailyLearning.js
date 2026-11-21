@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { updateScopedChatMessages } from './chatMessages.js'
 import { createDailySession, updateLearningDay } from './learningDays.js'
+import { buildLearningObservation, saveWithLearningObservation } from './learningObservation.js'
 import { LEARNING_SESSION_KEY, loadLearningSession, saveDailyLearningSession } from './learningSessionStorage.js'
 
 const writeLock = `${LEARNING_SESSION_KEY}.write`
 
-export function useDailyLearning(plan, restored) {
+export function useDailyLearning(plan, restored, onObservation) {
   const [session, setSession] = useState(() => restored ?? createDailySession(plan, crypto.randomUUID(), Date.now()))
   const [storageStatus, setStorageStatus] = useState('saved')
   const current = useRef(session)
@@ -17,7 +19,7 @@ export function useDailyLearning(plan, restored) {
     setSession(next)
   }
 
-  function transact(update) {
+  function transact(update, trigger) {
     function apply() {
       const local = current.current
       const stored = loadLearningSession()
@@ -29,20 +31,30 @@ export function useDailyLearning(plan, restored) {
         return
       }
       const base = remote?.revision > local.revision ? remote : local
-      const next = update(base)
-      const saved = next === remote || saveDailyLearningSession(next)
+      const updated = update(base)
+      const { session: next, saved, event } = trigger && updated !== base
+        ? saveWithLearningObservation(base, updated, trigger, saveDailyLearningSession)
+        : { session: updated, saved: updated === remote || saveDailyLearningSession(updated) }
       if (saved) {
         persisted.current = true
         savedRevision.current = next.revision
       }
       adopt(next)
       setStorageStatus(saved ? 'saved' : 'unavailable')
-      return next
+      return { next, event }
     }
 
     const next = queue.current.then(() => globalThis.navigator?.locks ? navigator.locks.request(writeLock, apply) : apply())
     queue.current = next.catch(() => setStorageStatus('unavailable'))
-    return queue.current
+    return queue.current.then((result) => {
+      if (result?.event && onObservation) {
+        void Promise.resolve().then(() => {
+          const observation = buildLearningObservation(current.current, result.event)
+          if (observation) return onObservation(observation)
+        }).catch(() => {})
+      }
+      return result?.next
+    })
   }
 
   useEffect(() => {
@@ -56,6 +68,7 @@ export function useDailyLearning(plan, restored) {
         else {
           savedRevision.current = remote.revision
           adopt(remote)
+          setStorageStatus('saved')
         }
       }
     }
@@ -65,14 +78,11 @@ export function useDailyLearning(plan, restored) {
 
   function dispatch(action) {
     const now = Date.now()
-    return transact((state) => updateLearningDay(state, { ...action, now }))
+    return transact((state) => updateLearningDay(state, { ...action, now }), action)
   }
 
-  function updateMessages(update) {
-    return transact((state) => {
-      const messages = update(state.messages)
-      return messages === state.messages ? state : { ...state, messages, revision: state.revision + 1 }
-    })
+  function updateMessages(update, context, replyId) {
+    return transact((state) => updateScopedChatMessages(state, context, update), replyId && { type: 'chatReply', messageId: replyId })
   }
 
   return { session, storageStatus, dispatch, updateMessages }
