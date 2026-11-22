@@ -22,6 +22,14 @@ export function useDailyLearning(plan, restored) {
     setSession(next)
   }
 
+  function observe(event, projectId) {
+    const run = () => runLearningAgent(event, { commit: (apply) => transact(apply, { durable: true }) })
+    const locks = globalThis.navigator?.locks
+    return locks
+      ? locks.request(`${writeLock}.observe:${projectId}:${event.id}`, { ifAvailable: true }, (lock) => lock ? run() : undefined)
+      : run()
+  }
+
   function transact(update, { trigger, durable = false } = {}) {
     function apply() {
       const local = current.current
@@ -55,9 +63,7 @@ export function useDailyLearning(plan, restored) {
     const next = queue.current.then(() => globalThis.navigator?.locks ? navigator.locks.request(writeLock, apply) : apply())
     queue.current = next.catch(() => setStorageStatus('unavailable'))
     return queue.current.then((result) => {
-      if (result?.event) {
-        void runLearningAgent(result.event, { commit: (apply) => transact(apply, { durable: true }) }).catch(() => {})
-      }
+      if (result?.event) void observe(result.event, result.next.projectId).catch(() => {})
       return result?.next
     })
   }
@@ -83,7 +89,12 @@ export function useDailyLearning(plan, restored) {
 
   function dispatch(action) {
     const now = Date.now()
-    return transact((state) => updateLearningDay(state, { ...action, now }), { trigger: action })
+    const run = () => transact((state) => updateLearningDay(state, { ...action, now }), { trigger: action })
+    const locks = globalThis.navigator?.locks
+    if (action.type !== 'advance' || !locks) return run()
+    // Two tabs may still have the same cached snapshot while the storage event is in transit.
+    const key = `${writeLock}.advance:${current.current.projectId}:${action.dayId}`
+    return locks.request(key, { ifAvailable: true }, (lock) => lock ? run() : undefined)
   }
 
   function updateMessages(update, context, replyId) {
