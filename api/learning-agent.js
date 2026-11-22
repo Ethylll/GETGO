@@ -76,9 +76,15 @@ export function createLearningAgentHandler({ fetchImpl = globalThis.fetch, env =
         }),
       })
       if (!result.ok) return reply({ error: 'upstream' }, 502)
-      const choice = (await result.json()).choices?.[0]
+      const envelope = await result.json().catch(() => null)
+      const choice = envelope?.choices?.[0]
       if (choice?.finish_reason !== 'stop') return reply({ error: 'output' }, 502)
-      const output = JSON.parse(choice.message.content)
+      let output
+      try {
+        output = JSON.parse(choice.message.content)
+      } catch {
+        return reply({ error: 'output' }, 502)
+      }
       if (input.operation === 'review') {
         return typeof output?.supported === 'boolean' ? reply({ supported: output.supported }) : reply({ error: 'output' }, 502)
       }

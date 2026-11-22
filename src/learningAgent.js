@@ -6,6 +6,14 @@ import { hasValidSourceRefs, indexSourceEvidence } from './services/validateLear
 
 export const AGENT_BUDGET = Object.freeze({ tools: 3, decisions: 4, modelCalls: 5, totalMs: 34_000 })
 const terminalStatuses = ['kept', 'finished', 'waiting', 'budget', 'stale', 'timeout', 'failed']
+const failureCodes = ['configuration', 'network', 'upstream', 'output', 'timeout', 'limit', 'request', 'action_rejected', 'unknown']
+
+class AgentRequestError extends Error {
+  constructor(code) {
+    super(code)
+    this.code = code
+  }
+}
 
 function setRound(session, round, changes = {}) {
   return { ...session, revision: session.revision + 1, agent: { ...session.agent, ...changes,
@@ -19,8 +27,10 @@ export function restoredAgentState(value, session, now = Date.now()) {
   const rounds = Array.isArray(input.rounds) ? [...new Map(input.rounds.filter((round) => days.has(round?.dayId) &&
     typeof round.eventId === 'string' && round.id === `round:${round.eventId}` && Number.isFinite(round.startedAt) &&
     Number.isFinite(round.deadline) && ['running', ...terminalStatuses].includes(round.status) &&
-    Array.isArray(round.steps) && round.steps.length <= AGENT_BUDGET.decisions).map((round) => [
-    round.id, round.status === 'running' && round.deadline <= now ? { ...round, status: 'timeout', endedAt: round.deadline } : round,
+    Array.isArray(round.steps) && round.steps.length <= AGENT_BUDGET.decisions).map(({ failureCode, ...round }) => [
+    round.id, round.status === 'running' && round.deadline <= now
+      ? { ...round, status: 'timeout', failureCode: 'timeout', endedAt: round.deadline }
+      : { ...round, ...(failureCodes.includes(failureCode) ? { failureCode } : {}) },
   ])).values()] : []
   const evidence = indexSourceEvidence(session.plan.sources)
   const notes = Array.isArray(input.notes) ? input.notes.filter((note) => days.has(note?.dayId) &&
@@ -52,15 +62,16 @@ export function claimAgentRound(session, event, now, deadline) {
   if (dayId !== event.dayId || !session.observations?.some(({ id, dayId: day }) => id === event.id && day === dayId) ||
     agent.rounds.some(({ eventId }) => eventId === event.id)) return session
   const rounds = agent.rounds.map((round) => round.status === 'running'
-    ? { ...round, status: round.deadline <= now ? 'timeout' : 'stale', endedAt: now } : round)
+    ? { ...round, endedAt: now, ...(round.deadline <= now ? { status: 'timeout', failureCode: 'timeout' } : { status: 'stale' }) } : round)
   rounds.push({ id: `round:${event.id}`, eventId: event.id, dayId, status: 'running', startedAt: now, deadline, steps: [] })
   return { ...session, revision: session.revision + 1, agent: { ...agent, rounds } }
 }
 
-export function finishAgentRound(session, roundId, status, now) {
+export function finishAgentRound(session, roundId, status, now, failureCode) {
   const round = session.agent?.rounds.find(({ id }) => id === roundId)
   return round?.status === 'running' && terminalStatuses.includes(status)
-    ? setRound(session, { ...round, status, endedAt: now })
+    ? setRound(session, { ...round, status, endedAt: now,
+      ...(failureCodes.includes(failureCode) ? { failureCode } : {}) })
     : session
 }
 
@@ -105,17 +116,27 @@ function stepResult(session, round, decision, prepared, actionId, now) {
   const status = rejectedAgain ? 'failed' : prepared.status === 'kept' ? 'kept'
     : prepared.stop === 'wait' ? 'waiting' : prepared.stop === 'finish' ? 'finished' : 'running'
   const next = prepared.status === 'applied' ? prepared.next : session
-  return setRound(next, { ...round, steps, status, ...(status === 'running' ? {} : { endedAt: now }) }, {
+  return setRound(next, { ...round, steps, status, ...(status === 'running' ? {} : { endedAt: now }),
+    ...(rejectedAgain ? { failureCode: 'action_rejected' } : {}) }, {
     ...(prepared.note ? { notes: [...next.agent.notes, prepared.note] } : {}),
     ...(prepared.change ? { changes: [...next.agent.changes, prepared.change] } : {}),
   })
 }
 
 export async function requestAgentStep(input, signal) {
-  const response = await fetch('/api/learning-agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input), signal })
-  if (!response.ok) throw new Error(response.status === 504 ? 'timeout' : 'upstream')
-  return response.json()
+  let response
+  try {
+    response = await fetch('/api/learning-agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input), signal })
+  } catch {
+    throw new AgentRequestError(signal?.aborted ? 'timeout' : 'network')
+  }
+  const payload = await response.json().catch(() => null)
+  if (response.ok && payload) return payload
+  if (response.ok) throw new AgentRequestError('output')
+  if (response.status === 504) throw new AgentRequestError('timeout')
+  if (failureCodes.includes(payload?.error)) throw new AgentRequestError(payload.error)
+  throw new AgentRequestError(response.status >= 500 ? 'upstream' : 'request')
 }
 
 function withDeadline(promise, signal) {
@@ -150,8 +171,8 @@ export async function runLearningAgent(event, { commit, request = requestAgentSt
     modelCalls++
     return withDeadline(request(input, controller.signal), controller.signal)
   }
-  const finish = async (status) => {
-    await commit((session) => finishAgentRound(session, roundId, status, now()))
+  const finish = async (status, failureCode = status === 'timeout' ? 'timeout' : undefined) => {
+    await commit((session) => finishAgentRound(session, roundId, status, now(), failureCode))
     return status
   }
   try {
@@ -162,8 +183,8 @@ export async function runLearningAgent(event, { commit, request = requestAgentSt
       const receipts = round.steps.map(({ receipt }) => receipt)
       const waiting = receipts.some(({ awaitsUser }) => awaitsUser)
       const answer = await tell({ operation: 'decide', frame: observationForModel(frame), receipts, remainingTools: waiting ? 0 : budget.tools - tools })
-      const decision = normalizeAgentDecision(answer.decision)
-      if (!decision) return await finish('failed')
+      const decision = normalizeAgentDecision(answer?.decision)
+      if (!decision) return await finish('failed', 'output')
       if (waiting && decision.type === 'act') return await finish('waiting')
       const takingAction = decision.type === 'act' && decision.action.type !== 'KEEP_PLAN'
       if (takingAction && ++tools > budget.tools) return await finish('budget')
@@ -199,7 +220,8 @@ export async function runLearningAgent(event, { commit, request = requestAgentSt
     const steps = latest.agent.rounds.find(({ id }) => id === roundId).steps
     return await finish(steps.some(({ receipt }) => receipt.awaitsUser) ? 'waiting' : 'budget')
   } catch (error) {
-    return await finish(controller.signal.aborted || error.message === 'timeout' ? 'timeout' : 'failed')
+    if (controller.signal.aborted || error?.message === 'timeout') return await finish('timeout')
+    return await finish('failed', error instanceof AgentRequestError ? error.code : 'unknown')
   } finally {
     clearTimeout(timer)
   }

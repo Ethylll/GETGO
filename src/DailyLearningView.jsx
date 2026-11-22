@@ -232,6 +232,9 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
             {plan.coverageGaps.map((gap) => <p key={gap}>{gap}</p>)}
           </details>
           {plan.notices.map((notice) => <p key={notice} className="text-sm text-muted">{notice}</p>)}
+          <p id="agent-data-notice" className="text-xs leading-relaxed text-muted">
+            推进学习日或提交学习反馈时，相关学习记录、问答和资料片段会发送给 DeepSeek，用于判断是否需要教学帮助。数据处理以 DeepSeek 的条款为准。
+          </p>
         </header>
         <div className="mt-5 space-y-4">
           <DailyList label="周期练习" items={required.filter(({ task }) => task.type === 'recurring')} focusedId={review ? null : focused?.id} onSelect={select} />
@@ -252,6 +255,7 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
         <footer className="mt-6 flex flex-wrap items-center justify-end gap-x-3 border-t border-line pt-3">
           {completed < required.length && <p className="mr-auto text-xs text-muted">还有未完成任务，原记录会保留。</p>}
           <button key={day.id} type="button" className="min-h-10 rounded-lg px-2 text-xs text-muted underline-offset-4 hover:underline" onClick={advance}
+            aria-describedby="agent-data-notice"
             title="推进 24 小时模拟学习时间"
             onKeyDown={(event) => { if (event.repeat) event.preventDefault() }}>
             下一日

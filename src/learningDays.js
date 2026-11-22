@@ -94,9 +94,9 @@ function assignInstances(day, tasks, optional, taskVersion) {
 
 function openDay(session, startedAt) {
   const dayNumber = session.days.length + 1
-  const day = { id: `day-${dayNumber}`, dayNumber, simulatedMinute: simulatedMinute(dayNumber), startedAt, endedAt: null,
-    limits: { ...session.limits }, instances: [] }
   const plan = activeLearningPlan(session)
+  const day = { id: `day-${dayNumber}`, dayNumber, simulatedMinute: simulatedMinute(dayNumber), startedAt, endedAt: null,
+    limits: compatibleDayLimits(plan, session.limits), instances: [] }
   const records = taskRecords(session.days)
   const schedule = new Map((session.agent?.schedule ?? []).map((item) => [item.taskId, item]))
   const priority = (id) => Number(schedule.get(id)?.priorityDay === dayNumber)
@@ -107,8 +107,13 @@ function openDay(session, startedAt) {
   return assignInstances(day, tasks, false)
 }
 
+export function compatibleDayLimits(plan, limits) {
+  const longestTask = Math.max(...plan.tasks.map(({ estimatedMinutes }) => estimatedMinutes))
+  return { ...limits, minutes: Math.max(limits.minutes, longestTask) }
+}
+
 export function createDailySession(plan, projectId, now, limits = DEFAULT_LEARNING_DAY_LIMITS) {
-  const session = { version: 2, projectId, revision: 0, plan, effectivePlan: null, limits: { ...limits }, days: [], messages: [] }
+  const session = { version: 2, projectId, revision: 0, plan, effectivePlan: null, limits: compatibleDayLimits(plan, limits), days: [], messages: [] }
   return { ...session, days: [openDay(session, now)] }
 }
 

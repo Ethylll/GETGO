@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { createServer } from 'vite'
 import { agentChangeControls, resolveAgentChange } from '../src/agentActions.js'
 import { planChangeFor } from '../src/agentPlanChanges.js'
 import { activeLearningPlan, createDailySession, updateLearningDay } from '../src/learningDays.js'
@@ -27,6 +30,23 @@ function memory() {
   const data = new Map()
   return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) }
 }
+
+test('进入新旧 V2 学习页即告知 DeepSeek 接收学习记录和问答，下一日按钮关联说明', async () => {
+  const vite = await createServer({ server: { middlewareMode: true, watch: null, ws: false } })
+  try {
+    const { default: DailyLearningView } = await vite.ssrLoadModule('/src/DailyLearningView.jsx')
+    const initialPlan = makePlan()
+    for (const restored of [undefined, testDay(fixture())]) {
+      const html = renderToStaticMarkup(createElement(DailyLearningView, { initialPlan, restored }))
+      const notice = html.match(/<p id="agent-data-notice"[^>]*>([^<]+)<\/p>/u)
+      assert.match(notice?.[1] ?? '', /学习记录、问答和资料片段会发送给 DeepSeek.*数据处理以 DeepSeek 的条款为准/u)
+      assert.match(html, /<button[^>]*aria-describedby="agent-data-notice"[^>]*>下一日<\/button>/u)
+      assert.ok(notice.index < html.indexOf('aria-describedby="agent-data-notice"'))
+    }
+  } finally {
+    await vite.close()
+  }
+})
 
 test('稍后回答可刷新恢复，学习安排和进度保持原样，也不启动新一轮观察', () => {
   const old = fixture([timeQuestion])

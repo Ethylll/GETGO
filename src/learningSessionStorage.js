@@ -1,7 +1,7 @@
 import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidPracticeTiming, isValidV2Task } from './services/validateLearningPlan.js'
 import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT, validatedLearningFeedback } from './chatMessages.js'
 import { sourceText } from './learningSources.js'
-import { activeLearningPlan, simulatedMinute, snapshotDailyTask } from './learningDays.js'
+import { activeLearningPlan, compatibleDayLimits, simulatedMinute, snapshotDailyTask } from './learningDays.js'
 import { storedObservations } from './learningObservation.js'
 import { restoredAgentState } from './learningAgent.js'
 import { clarificationContext } from './teachingInteractions.js'
@@ -226,7 +226,8 @@ export function loadLearningSession(storage) {
       const agent = snapshot.agent ? restoredAgentState(snapshot.agent, snapshot) : undefined
       const messages = storedMessages(snapshot.messages, snapshot.plan, { ...snapshot, agent })
       const days = snapshot.days.map((day) => ({ ...day, simulatedMinute: simulatedMinute(day.dayNumber) }))
-      const session = { ...snapshot, days, ...(agent ? { agent } : {}), messages,
+      const session = { ...snapshot, days, limits: compatibleDayLimits(activeLearningPlan(snapshot), snapshot.limits),
+        ...(agent ? { agent } : {}), messages,
         observations: storedObservations(snapshot.observations, new Set(snapshot.days.map(({ id }) => id)), messages) }
       return { status: 'restored', plan: activeLearningPlan(session), session }
     }

@@ -104,6 +104,20 @@ test('任务和时长双限，积压与独立任务轮流出现，解锁满额�
   assert.deepEqual(ids(advance(advance(finish(short, 'first')))), ['reflection'])
 })
 
+test('R6 内部配额低于单项时自适配，旧空日快照恢复后下一日可以安排', () => {
+  const plan = makePlan([makeTask('long', { estimatedMinutes: 30 })])
+  const created = newSession(plan, { minutes: 20, tasks: 1 })
+  assert.deepEqual(ids(created), ['long'])
+  assert.deepEqual(current(created).limits, { minutes: 30, tasks: 1 })
+  const storage = memoryStorage()
+  const old = { ...created, limits: { minutes: 20, tasks: 1 },
+    days: [{ ...created.days[0], instances: [], limits: { minutes: 20, tasks: 1 } }] }
+  assert.ok(saveDailyLearningSession(old, storage))
+  const recovered = loadLearningSession(storage).session
+  assert.deepEqual(ids(advance(recovered)), ['long'])
+  assert.deepEqual(current(advance(recovered)).limits, { minutes: 30, tasks: 1 })
+})
+
 test('调度只消费有效计划，保留历史内容与完成时间，巩固项使用新 ID', () => {
   const old = finish(newSession(), 'first')
   const changed = makePlan([

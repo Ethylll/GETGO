@@ -592,6 +592,36 @@ test('中断、超时、调用预算和日程推进期间的过期响应均不�
   assert.equal(JSON.parse(store.storage.getItem(LEARNING_SESSION_KEY)).agent.rounds.at(-1).status, 'stale')
 })
 
+test('脱敏轮次诊断区分配置、传输、模型输出和超时，原日照常推进', async (t) => {
+  const env = { DEEPSEEK_API_KEY: 'test-only' }
+  const handlers = [
+    ['configuration', createLearningAgentHandler({ env: {} })],
+    ['network', null],
+    ['upstream', createLearningAgentHandler({ env, fetchImpl: () => Response.json({}, { status: 502 }) })],
+    ['output', createLearningAgentHandler({ env, fetchImpl: () => Response.json({
+      choices: [{ finish_reason: 'stop', message: { content: 'synthetic invalid JSON' } }],
+    }) })],
+    ['timeout', () => Response.json({ error: 'timeout' }, { status: 504 })],
+  ]
+  let handler
+  t.mock.method(globalThis, 'fetch', (path, options) => {
+    if (!handler) throw new Error('synthetic private network detail')
+    return handler(new Request(`http://localhost${path}`, options))
+  })
+  const store = fixture()
+  for (const [expected, next] of handlers) {
+    handler = next
+    const event = store.nextDay()
+    await runLearningAgent(event, { commit: store.commit, now: () => at + 600 })
+    const round = store.read().agent.rounds.at(-1)
+    assert.equal(round.failureCode, expected)
+    assert.equal(round.status, expected === 'timeout' ? 'timeout' : 'failed')
+    assert.equal(store.read().effectivePlan, null)
+    assert.ok(!JSON.stringify(round).includes('synthetic'))
+  }
+  assert.equal(today(store.read()).dayNumber, handlers.length + 1)
+})
+
 test('API 只请求现有 DeepSeek 端点，返回受限决策，服务异常和上游超时可区分', async () => {
   const payload = { operation: 'decide', frame: { recentDays: [], messages: [], sources: [] }, receipts: [], remainingTools: 3 }
   const send = (handler, body = payload) => handler(new Request('http://localhost/api/learning-agent', {
