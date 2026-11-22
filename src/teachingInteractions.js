@@ -24,6 +24,7 @@ export function respondToClarification(session, { noteId, messageId, projectId, 
   if (!question || question.length > QUESTION_LIMIT || typeof messageId !== 'string' || !messageId ||
     session.messages.some(({ id }) => id === messageId)) return session
   const reply = { id: messageId, ...context, clarificationId: noteId, question, createdAt: Math.max(now, note.createdAt),
+    createdRevision: session.revision + 1, submittedOnDayId: session.days.at(-1).id,
     status: 'clarification', answer: '', citations: [] }
   const notes = session.agent.notes.map((item) => item === note ? { ...note, instanceId: context.instanceId } : item)
   return { ...session, revision: session.revision + 1, messages: [...session.messages, reply], agent: { ...session.agent, notes } }

@@ -1,6 +1,7 @@
 import { activeLearningPlan } from './learningDays.js'
 import { appliedDayEffects, applyPlanDelta, canReversePlanDelta, equalAgentData, groundedStep, onlyKeys, planChangeFor, reversePlanDelta, shortText } from './agentPlanChanges.js'
 import { sourceText } from './learningSources.js'
+import { occursAfter, practiceAfterChange } from './learningObservation.js'
 import { indexSourceEvidence } from './services/validateLearningPlan.js'
 
 export const AGENT_ACTIONS = ['KEEP_PLAN', 'GUIDE', 'CLARIFY', 'DECOMPOSE_TASK', 'ADJUST_PRACTICE', 'RESCHEDULE', 'CHECK_MASTERY', 'SEARCH_SOURCES']
@@ -60,15 +61,44 @@ export function availableAgentEvidence(frame, receipts = []) {
     ...frame.messages.map(({ evidenceId }) => evidenceId), ...frame.sources.map(({ evidenceId }) => evidenceId),
     ...frame.adjustments.flatMap(({ receiptId, subsequentPractice, subsequentFeedback }) =>
       [receiptId, ...[...subsequentPractice, ...subsequentFeedback].map(({ evidenceId }) => evidenceId)]),
-    ...frame.priorNotes.map(({ evidenceId }) => evidenceId),
+    ...frame.priorNotes.flatMap(({ evidenceId, reply }) => reply ? [evidenceId, reply.evidenceId] : [evidenceId]),
     ...receipts.flatMap(({ sources }) => (sources ?? []).map(({ evidenceId }) => evidenceId)),
   ])
 }
 
-function hasNewFeedback(frame, decision, taskId, after, kinds) {
-  return frame.messages.some((item) => decision.evidenceIds.includes(item.evidenceId) &&
+function hasNewFeedback(session, decision, taskId, afterRevision, afterTime, kinds) {
+  return session.messages.some((item) => decision.evidenceIds.includes(`message:${item.id}`) &&
     (item.clarificationId || item.feedback && (!kinds || kinds.includes(item.feedback.kind))) &&
-    (item.taskId === taskId || item.taskId === null) && item.createdAt > after)
+    (item.taskId === taskId || item.taskId === null) && occursAfter(item.createdRevision, item.createdAt, afterRevision, afterTime))
+}
+
+function hasNewPractice(session, taskId, afterRevision, afterTime, evidenceIds) {
+  return session.days.some(({ instances }) => instances.some((item) => item.task.id === taskId &&
+    (!evidenceIds || evidenceIds.includes(`instance:${item.id}`)) &&
+    (occursAfter(item.startedRevision, item.startedAt, afterRevision, afterTime) ||
+      occursAfter(item.completedRevision, item.completedAt, afterRevision, afterTime))))
+}
+
+function practiceIntent(delta) {
+  const { before, after } = delta.tasks[0] ?? {}
+  if (!before?.practice || !after?.practice) return []
+  const intent = [
+    ['minutes', after.estimatedMinutes - before.estimatedMinutes],
+    ['frequency', after.practice.frequency.interval - before.practice.frequency.interval],
+    ['review', after.practice.reviewAfter.interval - before.practice.reviewAfter.interval],
+  ].filter(([, direction]) => direction).map(([field, direction]) => `${field}:${Math.sign(direction)}`)
+  if (!equalAgentData(before.steps, after.steps) || !equalAgentData(before.practice.difficulty, after.practice.difficulty)) {
+    intent.push('practiceInstructions')
+  }
+  return intent
+}
+
+function similarProposal(previous, action, delta) {
+  if (previous.action.taskId !== action.taskId || previous.action.type !== action.type) return false
+  if (action.type === 'RESCHEDULE') return previous.action.params.operation === action.params.operation
+  if (action.type !== 'ADJUST_PRACTICE') return true
+  const previousIntent = practiceIntent(previous.delta)
+  return practiceIntent(delta).some((intent) => previousIntent.includes(intent))
 }
 
 export function prepareAgentAction(session, frame, receipts, decision, actionId, now) {
@@ -94,32 +124,38 @@ export function prepareAgentAction(session, frame, receipts, decision, actionId,
       : groundedStep(params, indexSourceEvidence(plan.sources))
     if (!content) return { code: 'invalid_note' }
     const prior = session.agent.notes.findLast((note) => note.taskId === (taskId ?? null) && note.type === type)
-    const newPractice = frame.recentDays.some(({ instances }) => instances.some((item) =>
-      item.taskId === taskId && (item.startedAt > prior?.createdAt || item.completedAt > prior?.createdAt)))
+    const newPractice = prior && hasNewPractice(session, taskId, prior.createdRevision, prior.createdAt)
     const priorIsRelevant = prior && (normalization(prior.text) === normalization(content.text) ||
-      !newPractice && !hasNewFeedback(frame, decision, taskId ?? null, prior.createdAt))
-    const alreadySaid = clarity && session.messages.some(({ question }) => normalization(question) === normalization(content.text))
+      !newPractice && !hasNewFeedback(session, decision, taskId ?? null, prior.createdRevision, prior.createdAt))
+    const alreadySaid = clarity && (session.messages.some(({ question, taskId: owner }) =>
+      owner === (taskId ?? null) && normalization(question) === normalization(content.text)) ||
+      session.agent.notes.some((note) => note.type === 'CLARIFY' && note.taskId === (taskId ?? null) &&
+        normalization(note.text) === normalization(content.text) &&
+        session.messages.some(({ clarificationId }) => clarificationId === note.id)))
     if (priorIsRelevant || alreadySaid || receipts.some((receipt) => receipt.taskId === (taskId ?? null) &&
       receipt.status === (clarity ? 'asked' : 'published'))) return { code: 'already_provided' }
     const instanceId = session.days.at(-1).instances.find(({ task }) => task.id === taskId)?.id ?? null
     return { status: clarity ? 'asked' : 'published', waiting: clarity, note: { id: actionId, type,
-      dayId: frame.dayId, taskId: taskId ?? null, instanceId, ...(target ? { taskTitle: target.title } : {}), ...content, createdAt: now },
+      dayId: frame.dayId, taskId: taskId ?? null, instanceId, ...(target ? { taskTitle: target.title } : {}),
+      ...content, createdAt: now, createdRevision: session.revision + 1 },
     ...(clarity ? {} : { review: { ...content, target: { title: target.title, objective: target.objective } } }) }
   }
 
   if (planActions.has(type)) {
+    const prepared = planChangeFor(session, action, actionId)
+    if (prepared.code) return prepared
     const rejected = session.agent.changes.findLast((change) => change.status === 'rejected' &&
-      equalAgentData(change.action, action))
-    if (rejected && !hasNewFeedback(frame, decision, taskId, rejected.resolvedAt)) return { code: 'user_already_declined' }
+      similarProposal(change, action, prepared.delta))
+    if (rejected && !hasNewFeedback(session, decision, taskId, rejected.resolvedRevision, rejected.resolvedAt) &&
+      !hasNewPractice(session, taskId, rejected.resolvedRevision, rejected.resolvedAt, decision.evidenceIds)) return { code: 'user_already_declined' }
     const alreadyPending = session.agent.changes.some((change) => change.status === 'pending' && change.dayId === frame.dayId &&
       equalAgentData(change.action, action))
     if (alreadyPending) return { code: 'already_pending' }
-    const adjustment = frame.adjustments.findLast(({ taskIds, waitingForPractice }) => taskIds.includes(taskId) && waitingForPractice)
-    if (adjustment && !(decision.exception && hasNewFeedback(frame, decision, taskId, adjustment.appliedAt, ['difficulty', 'time', 'direction']))) {
+    const adjustment = session.agent.changes.findLast((change) => change.status === 'applied' && !change.revertedBy && change.taskIds.includes(taskId))
+    if (adjustment && !practiceAfterChange(session.days, adjustment).length && !(decision.exception &&
+      hasNewFeedback(session, decision, taskId, adjustment.appliedRevision, adjustment.appliedAt, ['difficulty', 'time', 'direction']))) {
       return { code: 'awaiting_practice' }
     }
-    const prepared = planChangeFor(session, action, actionId)
-    if (prepared.code) return prepared
     const next = applyPlanDelta(session, prepared.delta)
     if (!next) return { code: 'invalid_dependencies' }
     const changes = prepared.delta.tasks
@@ -148,10 +184,9 @@ function pendingChangeIsCurrent(session, change) {
 }
 
 function changeHasLearningRecord(session, change) {
-  return session.days.some(({ instances }) => instances.some(({ task, startedAt, completedAt }) =>
-    change.taskIds.includes(task.id) && (startedAt !== null && startedAt >= change.appliedAt ||
-      completedAt !== null && completedAt >= change.appliedAt))) ||
-    session.messages.some(({ taskId, createdAt }) => change.taskIds.includes(taskId) && createdAt >= change.appliedAt)
+  return change.taskIds.some((id) => hasNewPractice(session, id, change.appliedRevision, change.appliedAt)) ||
+    session.messages.some(({ taskId, createdAt, createdRevision }) => change.taskIds.includes(taskId) &&
+      occursAfter(createdRevision, createdAt, change.appliedRevision, change.appliedAt))
 }
 
 export function agentChangeControls(session, change) {
@@ -175,7 +210,7 @@ export function resolveAgentChange(session, id, command, now) {
       changes: [...session.agent.changes.map((item) => item === change ? { ...item, ...patch } : item), ...(extra ? [extra] : [])] },
   })
   if (change.status === 'pending') {
-    if (command === 'reject') return replace({ status: 'rejected', resolvedAt: now })
+    if (command === 'reject') return replace({ status: 'rejected', resolvedAt: now, resolvedRevision: session.revision + 1 })
     if (command !== 'accept' || !pendingChangeIsCurrent(session, change)) return session
     const activePractice = change.action.type === 'ADJUST_PRACTICE' ? change.action.taskId : undefined
     const next = applyPlanDelta(session, change.delta, activePractice)

@@ -8,6 +8,7 @@ import { saveWithLearningObservation } from '../src/learningObservation.js'
 import { LEARNING_SESSION_KEY, loadLearningSession, saveDailyLearningSession } from '../src/learningSessionStorage.js'
 import { makePlan, makeTask, practice, sourceRefs } from './fixtures/dailyLearningPlan.js'
 import { createLearningAgentHandler } from '../api/learning-agent.js'
+import { respondToClarification } from '../src/teachingInteractions.js'
 
 const at = 1_800_001_000_000
 const today = (session) => session.days.at(-1)
@@ -46,7 +47,7 @@ function fixture(plan = makePlan(), start = (session) => session, limits) {
   function feedback(id, text, taskId = 'practice', kind = 'difficulty') {
     const day = today(state)
     const turn = { id, projectId: state.projectId, taskId, instanceId: `${day.id}:${taskId}`, dayId: day.id, question: text,
-      createdAt: at + 800, status: 'pending', answer: '', citations: [] }
+      createdAt: at + 800, createdRevision: state.revision + 1, status: 'pending', answer: '', citations: [] }
     const before = { ...state, messages: [...state.messages, turn] }
     const after = { ...before, revision: before.revision + 2, messages: [...state.messages, {
       ...turn, status: 'insufficient', feedback: { kind, excerpt: text },
@@ -131,6 +132,29 @@ test('澄清真的进入教学记录并回传等待回执，没有用户回复�
     : act('CLARIFY', 'practice', { question: '你遇到的是时间不足，还是敲击动作不清楚？' }))
   assert.equal(duplicate.round.steps[0].receipt.code, 'already_provided')
   assert.equal(today(store.read()).dayNumber, 3)
+})
+
+test('历史已回答澄清在观察窗口外也不复问，近期原问题与答复送入同一观察', async () => {
+  const store = fixture()
+  const event = store.nextDay()
+  const old = { id: 'old-question', type: 'CLARIFY', taskId: 'practice', dayId: 'day-1',
+    text: '需要更慢速度吗？', createdAt: at + 2 }
+  const recent = { ...old, id: 'recent-question', text: '哪个动作最难？', dayId: 'day-2' }
+  store.commit((s) => ({ ...s, agent: { rounds: [], schedule: [], changes: [],
+    notes: [old, ...Array.from({ length: 6 }, (_, n) => ({ ...old, id: `other-${n}`, taskId: 'first' })), recent] } }))
+  for (const [note, answer] of [[old, '不用放慢'], [recent, '交替动作']]) {
+    store.commit((s) => respondToClarification(s, { noteId: note.id, messageId: `answer-${note.id}`,
+      projectId: s.projectId, text: answer, now: at + 510 }))
+  }
+  store.commit((s) => progress(s, 'start', 'practice', at + 520))
+  const result = await simulate(store, event, ({ frame, receipts }) => {
+    assert.ok(!frame.priorNotes.some(({ evidenceId }) => evidenceId === 'note:old-question'))
+    assert.deepEqual(frame.priorNotes.find(({ evidenceId }) => evidenceId === 'note:recent-question').reply, {
+      text: '交替动作', evidenceId: 'message:answer-recent-question', submittedOnDayId: 'day-2',
+    })
+    return receipts.length ? stop() : act('CLARIFY', 'practice', { question: '需要更慢速度吗？' })
+  })
+  assert.equal(result.round.steps[0].receipt.code, 'already_provided')
 })
 
 test('已公开的提示在同一轮换措辞也不重复发布，后续观察在没有新实践时仍等待', async () => {
@@ -385,6 +409,38 @@ test('拆解已生效且尚未实践时，同一困难不会重复改变任务',
   assert.equal(store.read().agent.changes.length, 1)
 })
 
+test('R7 六个合法变更后，退出五条观察窗口的任务仍等待实际练习', async () => {
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f']
+  const store = fixture(makePlan(ids.map((id) => makeTask(id, { type: 'recurring', practice }))))
+  for (const id of ids) {
+    const result = await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop()
+      : act('ADJUST_PRACTICE', id, { minutes: 5 }))
+    assert.equal(result.round.steps[0].receipt.status, 'applied')
+  }
+  const repeated = await simulate(store, store.nextDay(), ({ frame, receipts }) => {
+    assert.deepEqual(frame.adjustments.map(({ taskIds }) => taskIds[0]), ids.slice(1))
+    return receipts.length ? stop() : act('ADJUST_PRACTICE', 'a', { minutes: 4 })
+  })
+  assert.equal(repeated.round.steps[0].receipt.code, 'awaiting_practice')
+  assert.equal(task(store.read(), 'a').estimatedMinutes, 5)
+})
+
+test('R4 拒绝延长后拦同方向的近似时长提案，允许有新用户证据的判断', async () => {
+  const store = fixture()
+  await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop('wait')
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 14 }))
+  const rejected = store.read().agent.changes[0]
+  store.commit((s) => resolveAgentChange(s, rejected.id, 'reject', at + 3_000))
+  const repeat = await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 13 }))
+  assert.equal(repeat.round.steps[0].receipt.code, 'user_already_declined')
+  assert.equal(task(store.read(), 'practice').estimatedMinutes, 6)
+  const event = store.feedback('more-time', '我现在每天能留出更多时间了', 'practice', 'time')
+  const allowed = await simulate(store, event, ({ receipts }) => receipts.length ? stop('wait')
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 13 }, { evidenceIds: ['message:more-time'] }))
+  assert.equal(allowed.round.steps[0].receipt.status, 'pendingConfirmation')
+})
+
 test('新困难例外必须有调整后原话，既有困难不能凭模型标签覆盖保护', async () => {
   const store = fixture()
   await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop() : act('ADJUST_PRACTICE', 'practice', { minutes: 4 }))
@@ -479,10 +535,10 @@ test('原文频率、拒绝过的提案和过期确认受保护，非法依赖�
   const repeat = await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop()
     : act('DECOMPOSE_TASK', 'setup', high.action.params))
   assert.equal(repeat.round.steps[0].receipt.code, 'user_already_declined')
-  const different = [exercise, { ...exercise, title: '改用两小步' }]
   await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop('wait')
-    : act('DECOMPOSE_TASK', 'setup', { parts: different }))
+    : act('DECOMPOSE_TASK', 'practice', { parts: [exercise, { ...exercise, title: '改用两小步' }] }))
   const pending = store.read().agent.changes.at(-1)
+  assert.equal(pending.status, 'pending')
   const invalid = structuredClone(pending.delta)
   invalid.tasks[0].after.prerequisiteTaskIds.push(invalid.tasks[0].taskId)
   assert.equal(applyPlanDelta(store.read(), invalid), null)

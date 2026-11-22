@@ -34,7 +34,10 @@ export function updateScopedChatMessages(session, context, update) {
   if (session.projectId !== context.projectId || !session.days.some(({ id, instances }) => id === context.dayId &&
     (context.instanceId === null || instances.some((item) => item.id === context.instanceId)))) return session
   const messages = update(session.messages)
-  return messages === session.messages ? session : { ...session, messages, revision: session.revision + 1 }
+  if (messages === session.messages) return session
+  const ids = new Set(session.messages.map(({ id }) => id))
+  const revision = session.revision + 1
+  return { ...session, revision, messages: messages.map((turn) => ids.has(turn.id) ? turn : { ...turn, createdRevision: revision }) }
 }
 
 export function taskChatHistory(messages, taskId) {

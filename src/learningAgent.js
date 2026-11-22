@@ -72,10 +72,15 @@ function frameForRound(session, event) {
   const reply = session.messages.find(({ id, clarificationId }) => id === event.messageId && clarificationId)
   const prompt = reply && agent.notes.find(({ id }) => id === reply.clarificationId)
   const notes = [...new Set([prompt, ...agent.notes.slice(-6)].filter(Boolean))].slice(0, 6)
+  const answers = new Map(session.messages.filter(({ clarificationId }) => clarificationId)
+    .map((message) => [message.clarificationId, message]))
   return { ...observation, ...(prompt ? { clarification: { promptId: `note:${prompt.id}`, replyId: `message:${reply.id}` } } : {}),
-    priorNotes: notes.map(({ id, type, taskId, text, dayId }) => ({
-    evidenceId: `note:${id}`, type, taskId, text, dayId,
-  })), recentProposals: agent.changes.slice(-6).map(({ id, taskIds, status, action, reason }) => ({
+    priorNotes: notes.map(({ id, type, taskId, text, dayId }) => {
+      const answer = answers.get(id)
+      return { evidenceId: `note:${id}`, type, taskId, text, dayId,
+        ...(answer ? { reply: { evidenceId: `message:${answer.id}`, text: answer.question.slice(0, 320),
+          submittedOnDayId: answer.submittedOnDayId } } : {}) }
+    }), recentProposals: agent.changes.slice(-6).map(({ id, taskIds, status, action, reason }) => ({
     id, taskIds, status, action: action.type, reason,
   })) }
 }

@@ -61,7 +61,9 @@ function storedMessages(messages, plan, session) {
       ids.add(turn.id)
       clarificationIds.add(note.id)
       result.push({ id: turn.id, ...context, clarificationId: note.id, question: turn.question,
-        createdAt: turn.createdAt, status: 'clarification', answer: '', citations: [] })
+        createdAt: turn.createdAt, status: 'clarification', answer: '', citations: [],
+        ...(days.has(turn.submittedOnDayId) ? { submittedOnDayId: turn.submittedOnDayId } : {}),
+        ...(Number.isSafeInteger(turn.createdRevision) ? { createdRevision: turn.createdRevision } : {}) })
       continue
     }
     const day = days?.get(turn.dayId)
@@ -86,7 +88,8 @@ function storedMessages(messages, plan, session) {
     const { id, taskId, question, createdAt } = turn
     const feedback = session && validatedLearningFeedback(question, turn.feedback)
     result.push({ id, taskId, question, createdAt, status, answer, citations,
-      ...(session ? { projectId: turn.projectId, dayId: turn.dayId, instanceId: turn.instanceId ?? null } : {}),
+      ...(session ? { projectId: turn.projectId, dayId: turn.dayId, instanceId: turn.instanceId ?? null,
+        ...(Number.isSafeInteger(turn.createdRevision) ? { createdRevision: turn.createdRevision } : {}) } : {}),
       ...(feedback ? { feedback } : {}) })
   }
   return result

@@ -11,6 +11,8 @@ const ADJUSTMENT_LIMIT = 5
 
 const normalized = (text) => text.normalize('NFKC').toLowerCase().replace(/[\s\p{P}]/gu, '')
 const field = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : ''
+export const occursAfter = (revision, time, priorRevision, priorTime) =>
+  Number.isSafeInteger(revision) && Number.isSafeInteger(priorRevision) ? revision > priorRevision : time !== null && time > priorTime
 
 export function storedObservations(events, dayIds, messages) {
   if (!Array.isArray(events)) return []
@@ -87,10 +89,8 @@ export function practiceAfterChange(days, change, taskIds = change.taskIds) {
     if (change.dayEffects && !['updated', 'scheduled', 'paused'].includes(effect)) return false
     if (instance.taskVersion !== undefined && change.appliedRevision !== undefined &&
       ['updated', 'scheduled'].includes(effect) && instance.taskVersion !== change.appliedRevision) return false
-    if (change.appliedRevision !== undefined) {
-      return instance.startedRevision >= change.appliedRevision || instance.completedRevision >= change.appliedRevision
-    }
-    return instance.startedAt > change.appliedAt
+    return occursAfter(instance.startedRevision, instance.startedAt, change.appliedRevision, change.appliedAt) ||
+      Boolean(change.dayEffects) && occursAfter(instance.completedRevision, instance.completedAt, change.appliedRevision, change.appliedAt)
   }).map((instance) => ({ instance, day })))
 }
 
@@ -101,14 +101,15 @@ function describeAdjustments(adjustments, days, knownTasks, turns) {
     const taskIds = item.taskIds.filter((id) => knownTasks.has(id)).slice(0, TASK_LIMIT)
     const firstDay = days.findIndex(({ id }) => id === item.dayId)
     const practice = practiceAfterChange(days, item, taskIds)
-    const followUp = turns.filter((turn) => taskIds.includes(turn.taskId) && turn.createdAt >= item.appliedAt && turn.feedback)
+    const followUp = turns.filter((turn) => taskIds.includes(turn.taskId) && (turn.feedback || turn.clarificationId) &&
+      occursAfter(turn.createdRevision, turn.createdAt, item.appliedRevision, item.appliedAt))
     return { receiptId: `receipt:${item.id}`, action: field(item.action, 40), appliedAt: item.appliedAt, taskIds,
       dayNumber: days[firstDay].dayNumber,
       ...(item.dayEffects ? { dayEffects: item.dayEffects } : {}),
       subsequentPractice: practice.slice(-3).map(({ instance, day }) => describeInstance(instance, day)),
       waitingForPractice: practice.length === 0,
-      subsequentFeedback: followUp.slice(-3).map(({ id, dayId, taskId, feedback }) => ({
-        evidenceId: `message:${id}`, dayId, taskId, feedback,
+      subsequentFeedback: followUp.slice(-3).map(({ id, dayId, taskId, feedback, clarificationId, question }) => ({
+        evidenceId: `message:${id}`, dayId, taskId, feedback, ...(clarificationId ? { clarificationId, reply: field(question, 320) } : {}),
       })) }
   })
 }
@@ -135,7 +136,7 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
     turn.citations?.some(({ sourceId }) => focusedSources.has(sourceId))).slice(-4)
   const projectFeedback = turns.filter((turn) => turn.taskId === null && turn.feedback).slice(-3)
   const selectedTurns = [...new Set([trigger, ...projectFeedback, ...relatedTurns, ...turns.slice(-MESSAGE_LIMIT)].filter(Boolean))]
-    .slice(0, MESSAGE_LIMIT).sort((a, b) => a.createdAt - b.createdAt)
+    .slice(0, MESSAGE_LIMIT).sort((a, b) => turns.indexOf(a) - turns.indexOf(b))
   const originals = new Map(plan.sources.filter(({ status }) => status === 'processed').map((source) => [source.sourceId, source]))
   const selectedTasks = [...new Set([...relatedIds, ...plan.tasks.map(({ id }) => id)])].slice(0, TASK_LIMIT)
   const references = [...selectedTurns.flatMap(({ citations }) => citations ?? []),
@@ -176,9 +177,9 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
       oneTime: { completed: plan.tasks.filter(({ id, type }) => type === 'oneTime' && oneTime.has(id)).length,
         planned: plan.tasks.filter(({ type }) => type === 'oneTime').length } },
     recentDays, summaries, sources: [...sources.values()],
-    messages: selectedTurns.map(({ id, dayId, instanceId, taskId, question, answer, status, feedback, createdAt, clarificationId }) => ({
+    messages: selectedTurns.map(({ id, dayId, instanceId, taskId, question, answer, status, feedback, clarificationId, submittedOnDayId }) => ({
       evidenceId: `message:${id}`, dayId, dayNumber: daysById.get(dayId)?.dayNumber, instanceId, taskId, question: field(question, 320),
-      helpProvided: field(answer, 320), status, feedback, createdAt, ...(clarificationId ? { clarificationId } : {}),
+      helpProvided: field(answer, 320), status, feedback, ...(clarificationId ? { clarificationId, submittedOnDayId } : {}),
     })),
     adjustments: describeAdjustments(adjustments, session.days, knownTasks, turns),
   }
@@ -188,13 +189,10 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
 // Only simulated day coordinates and observed behavior are sent for teaching.
 export function observationForModel(frame) {
   const instance = ({ startedAt, completedAt, ...entry }) => entry
-  const message = ({ createdAt, ...entry }) => entry
   return { ...frame,
     recentDays: frame.recentDays.map((day) => ({ ...day, instances: day.instances.map(instance) })),
     summaries: frame.summaries.map((summary) => ({ ...summary, latestPractice: summary.latestPractice.map(instance) })),
     adjustments: frame.adjustments.map(({ appliedAt, subsequentPractice, ...entry }) =>
       ({ ...entry, subsequentPractice: subsequentPractice.map(instance) })),
-    messages: frame.messages.map(message),
-    priorNotes: frame.priorNotes?.map(message),
   }
 }
