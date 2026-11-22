@@ -149,7 +149,7 @@ export function planChangeFor(session, action, actionId) {
   return { delta, confirmation }
 }
 
-export function applyPlanDelta(session, delta, now, startedTaskId) {
+export function applyPlanDelta(session, delta, startedTaskId) {
   const plan = activeLearningPlan(session)
   const tasks = [...plan.tasks]
   const schedule = new Map((session.agent?.schedule ?? []).map((item) => [item.taskId, item]))
@@ -175,6 +175,24 @@ export function applyPlanDelta(session, delta, now, startedTaskId) {
   if (tasks.length > 32 || !isValidLearningPlan(effectivePlan, plan.sources)) return null
   const affected = new Set([...delta.tasks, ...delta.schedule].map(({ taskId }) => taskId))
   return reviseOpenLearningDay({ ...session, effectivePlan, agent: { ...session.agent, schedule: [...schedule.values()] } }, affected, startedTaskId)
+}
+
+export function appliedDayEffects(session, next, delta) {
+  const day = session.days.at(-1)
+  const updated = next.days.at(-1)
+  const ids = new Set([...delta.tasks, ...delta.schedule].map(({ taskId }) => taskId))
+  return [...ids].map((taskId) => {
+    const instanceId = `${day.id}:${taskId}`
+    const before = day.instances.find(({ id }) => id === instanceId)
+    const after = updated.instances.find(({ id }) => id === instanceId)
+    if (after?.held && !before?.held) return { taskId, instanceId, effect: 'paused' }
+    if (before && !after) return { taskId, instanceId, effect: 'removed' }
+    if (after && !after.held && (!before || before.held || !equalAgentData(before.task, after.task))) {
+      return { taskId, instanceId, effect: before && !before.held ? 'updated' : 'scheduled',
+        estimatedMinutes: after.task.estimatedMinutes }
+    }
+    return { taskId, effect: 'future', ...(after ? { instanceId, estimatedMinutes: after.task.estimatedMinutes } : {}) }
+  })
 }
 
 export function reversePlanDelta(delta) {

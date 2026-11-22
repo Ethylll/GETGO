@@ -70,11 +70,28 @@ function describeTask(task) {
 
 function describeInstance(item, day) {
   const outcome = item.status === 'completed' ? 'completed'
-    : item.held ? 'held' : day.endedAt === null ? 'open' : 'unfinished'
+    : item.held && item.startedAt === null ? 'held' : day.endedAt === null ? 'open' : 'unfinished'
   return { evidenceId: `instance:${item.id}`, id: item.id, taskId: item.task.id, title: field(item.task.title, 120),
     type: item.task.type, optional: item.optional, status: item.status, startedAt: item.startedAt,
-    completedAt: item.completedAt, outcome, dayNumber: day.dayNumber,
+    completedAt: item.completedAt, outcome, dayNumber: day.dayNumber, ...(item.held ? { held: true } : {}),
     selfChecks: item.feedback.slice(0, 4).map((value) => field(value, 120)) }
+}
+
+export function practiceAfterChange(days, change, taskIds = change.taskIds) {
+  const firstDay = days.findIndex(({ id }) => change.dayId === id)
+  if (firstDay < 0) return []
+  return days.slice(firstDay).flatMap((day, index) => day.instances.filter((instance) => {
+    if (!taskIds.includes(instance.task.id) || instance.held || instance.startedAt === null) return false
+    if (index > 0) return true
+    const effect = change.dayEffects?.find(({ instanceId }) => instanceId === instance.id)?.effect
+    if (change.dayEffects && !['updated', 'scheduled', 'paused'].includes(effect)) return false
+    if (instance.taskVersion !== undefined && change.appliedRevision !== undefined &&
+      ['updated', 'scheduled'].includes(effect) && instance.taskVersion !== change.appliedRevision) return false
+    if (change.appliedRevision !== undefined) {
+      return instance.startedRevision >= change.appliedRevision || instance.completedRevision >= change.appliedRevision
+    }
+    return instance.startedAt > change.appliedAt
+  }).map((instance) => ({ instance, day })))
 }
 
 function describeAdjustments(adjustments, days, knownTasks, turns) {
@@ -83,12 +100,13 @@ function describeAdjustments(adjustments, days, knownTasks, turns) {
     Array.isArray(item.taskIds) && item.taskIds.some((id) => knownTasks.has(id))).slice(-ADJUSTMENT_LIMIT).map((item) => {
     const taskIds = item.taskIds.filter((id) => knownTasks.has(id)).slice(0, TASK_LIMIT)
     const firstDay = days.findIndex(({ id }) => id === item.dayId)
-    const practice = days.slice(firstDay).flatMap((day) => day.instances.filter(({ task, startedAt }) =>
-      taskIds.includes(task.id) && startedAt !== null && startedAt >= item.appliedAt).map((instance) => describeInstance(instance, day)))
+    const practice = practiceAfterChange(days, item, taskIds)
     const followUp = turns.filter((turn) => taskIds.includes(turn.taskId) && turn.createdAt >= item.appliedAt && turn.feedback)
     return { receiptId: `receipt:${item.id}`, action: field(item.action, 40), appliedAt: item.appliedAt, taskIds,
       dayNumber: days[firstDay].dayNumber,
-      subsequentPractice: practice.slice(-3), waitingForPractice: practice.length === 0,
+      ...(item.dayEffects ? { dayEffects: item.dayEffects } : {}),
+      subsequentPractice: practice.slice(-3).map(({ instance, day }) => describeInstance(instance, day)),
+      waitingForPractice: practice.length === 0,
       subsequentFeedback: followUp.slice(-3).map(({ id, dayId, taskId, feedback }) => ({
         evidenceId: `message:${id}`, dayId, taskId, feedback,
       })) }

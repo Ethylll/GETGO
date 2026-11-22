@@ -200,6 +200,75 @@ test('带问答的旧实例保留只读记录，确认新增前置后仍须完�
   assert.equal(after.messages[0].id, 'prior-question')
 })
 
+test('R1 已开始的旧实例接受拆解或延期后，直接完成也不会解锁后继', async () => {
+  for (const proposed of [
+    act('DECOMPOSE_TASK', 'first', { parts: [{ ...exercise, title: '准备姿势' }, exercise] }),
+    act('RESCHEDULE', 'first', { operation: 'defer', days: 1 }),
+  ]) {
+    const store = fixture()
+    const event = store.nextDay()
+    store.commit((state) => progress(state, 'start', 'first', at + 550))
+    store.feedback('prior', '我还是做不到这个动作', 'first')
+    await simulate(store, event, ({ receipts }) => receipts.length ? stop('wait') : proposed)
+    const id = store.read().agent.changes[0].id
+    let state = store.commit((before) => resolveAgentChange(before, id, 'accept', at + 2_000))
+    assert.equal(state.agent.changes[0].dayEffects.find(({ taskId }) => taskId === 'first').effect, 'paused')
+    assert.equal(today(state).instances.find(({ task }) => task.id === 'first').startedAt, at + 550)
+    assert.equal(currentDayInstances(state).some(({ task }) => task.id === 'first'), false)
+    assert.equal(progress(state, 'complete', 'first', at + 2_001), state)
+    assert.ok(!today(state).instances.some(({ task }) => task.id === 'reflection'))
+    assert.equal(state.messages[0].instanceId, 'day-2:first')
+    const day2 = today(state)
+    state = store.commit((before) => resolveAgentChange(before, id, 'undo', at + 2_002))
+    assert.equal(state.agent.changes[0].status, 'undone')
+    assert.ok(progress(state, 'complete', 'first', at + 2_003) !== state)
+    assert.equal(day2.instances.find(({ task }) => task.id === 'first').status, 'inProgress')
+  }
+})
+
+test('R2/R3 有旧问答的进行中练习确实更新，完成按新版本进入观察', async () => {
+  const store = fixture()
+  const event = store.nextDay()
+  store.commit((state) => progress(state, 'start', 'practice', at + 550))
+  store.feedback('prior', '我还分不清节奏')
+  await simulate(store, event, ({ receipts }) => receipts.length ? stop('wait') : act('ADJUST_PRACTICE', 'practice', { minutes: 3 }))
+  const id = store.read().agent.changes[0].id
+  const applied = store.commit((state) => resolveAgentChange(state, id, 'accept', at + 2_000))
+  const instance = today(applied).instances.find(({ task }) => task.id === 'practice')
+  assert.equal(instance.task.estimatedMinutes, 3)
+  assert.equal(instance.startedAt, at + 550)
+  assert.equal(applied.messages[0].instanceId, instance.id)
+  assert.equal(applied.agent.changes[0].delta.tasks[0].before.estimatedMinutes, 6)
+  assert.deepEqual(applied.agent.changes[0].dayEffects, [{
+    effect: 'updated', taskId: 'practice', instanceId: instance.id, estimatedMinutes: 3,
+  }])
+  store.commit((state) => progress(state, 'complete', 'practice', at + 2_000))
+  await simulate(store, store.nextDay(), ({ frame }) => {
+    assert.equal(frame.adjustments[0].waitingForPractice, false)
+    assert.equal(frame.adjustments[0].subsequentPractice[0].status, 'completed')
+    assert.equal(frame.adjustments[0].dayEffects[0].estimatedMinutes, 3)
+    return act('KEEP_PLAN')
+  })
+  assert.equal(store.read().agent.rounds.at(-1).status, 'kept')
+})
+
+test('配额保留旧实例时，执行回执明确仅后续生效，旧实例完成不算新练习', async () => {
+  const store = fixture(makePlan(), undefined, { minutes: 12, tasks: 2 })
+  const event = store.nextDay()
+  store.feedback('prior', '我还分不清节奏')
+  const run = await simulate(store, event, ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 7 }))
+  assert.deepEqual(run.round.steps[0].receipt.dayEffects, [{
+    effect: 'future', taskId: 'practice', instanceId: 'day-2:practice', estimatedMinutes: 6,
+  }])
+  store.commit((state) => progress(progress(state, 'start', 'practice'), 'complete', 'practice'))
+  await simulate(store, store.nextDay(), ({ frame }) => {
+    assert.equal(frame.adjustments[0].waitingForPractice, true)
+    return act('KEEP_PLAN')
+  })
+  assert.equal(store.read().agent.rounds.at(-1).status, 'kept')
+})
+
 test('练习调整影响可执行步骤、难度和两类间隔；已开始任务需要用户确认', async () => {
   const store = fixture()
   const event = store.nextDay()
@@ -416,7 +485,7 @@ test('原文频率、拒绝过的提案和过期确认受保护，非法依赖�
   const pending = store.read().agent.changes.at(-1)
   const invalid = structuredClone(pending.delta)
   invalid.tasks[0].after.prerequisiteTaskIds.push(invalid.tasks[0].taskId)
-  assert.equal(applyPlanDelta(store.read(), invalid, at + 3_500), null)
+  assert.equal(applyPlanDelta(store.read(), invalid), null)
   store.nextDay()
   assert.equal(resolveAgentChange(store.read(), pending.id, 'accept', at + 4_000), store.read())
   assert.equal(store.read().effectivePlan, null)

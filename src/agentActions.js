@@ -1,5 +1,5 @@
 import { activeLearningPlan } from './learningDays.js'
-import { applyPlanDelta, canReversePlanDelta, equalAgentData, groundedStep, onlyKeys, planChangeFor, reversePlanDelta, shortText } from './agentPlanChanges.js'
+import { appliedDayEffects, applyPlanDelta, canReversePlanDelta, equalAgentData, groundedStep, onlyKeys, planChangeFor, reversePlanDelta, shortText } from './agentPlanChanges.js'
 import { sourceText } from './learningSources.js'
 import { indexSourceEvidence } from './services/validateLearningPlan.js'
 
@@ -120,7 +120,7 @@ export function prepareAgentAction(session, frame, receipts, decision, actionId,
     }
     const prepared = planChangeFor(session, action, actionId)
     if (prepared.code) return prepared
-    const next = applyPlanDelta(session, prepared.delta, now)
+    const next = applyPlanDelta(session, prepared.delta)
     if (!next) return { code: 'invalid_dependencies' }
     const changes = prepared.delta.tasks
     const review = ['CHECK_MASTERY', 'DECOMPOSE_TASK', 'ADJUST_PRACTICE'].includes(type)
@@ -134,7 +134,9 @@ export function prepareAgentAction(session, frame, receipts, decision, actionId,
       ...(review ? { review } : {}), change: { id: actionId, action, reason: decision.reason,
         taskIds: [...new Set([taskId, ...changes.map((change) => change.taskId)])], dayId: frame.dayId,
         status: prepared.confirmation ? 'pending' : 'applied', needsConfirmation: prepared.confirmation,
-        proposedAt: now, appliedAt: prepared.confirmation ? null : now, delta: prepared.delta }, next }
+        proposedAt: now, appliedAt: prepared.confirmation ? null : now, delta: prepared.delta,
+        ...(prepared.confirmation ? {} : { appliedRevision: session.revision + 1,
+          dayEffects: appliedDayEffects(session, next, prepared.delta) }) }, next }
   }
   return { code: 'unknown_action' }
 }
@@ -176,19 +178,21 @@ export function resolveAgentChange(session, id, command, now) {
     if (command === 'reject') return replace({ status: 'rejected', resolvedAt: now })
     if (command !== 'accept' || !pendingChangeIsCurrent(session, change)) return session
     const activePractice = change.action.type === 'ADJUST_PRACTICE' ? change.action.taskId : undefined
-    const next = applyPlanDelta(session, change.delta, now, activePractice)
-    return next ? replace({ status: 'applied', resolvedAt: now, appliedAt: now }, next) : session
+    const next = applyPlanDelta(session, change.delta, activePractice)
+    return next ? replace({ status: 'applied', resolvedAt: now, appliedAt: now, appliedRevision: session.revision + 1,
+      dayEffects: appliedDayEffects(session, next, change.delta) }, next) : session
   }
   if (change.status !== 'applied' || change.revertedBy || change.restores || !['undo', 'restore'].includes(command)) return session
   const linked = changeHasLearningRecord(session, change)
   if (linked !== (command === 'restore')) return session
   const delta = reversePlanDelta(change.delta)
   const activePractice = change.action.type === 'ADJUST_PRACTICE' ? change.action.taskId : undefined
-  const next = applyPlanDelta(session, delta, now, activePractice)
+  const next = applyPlanDelta(session, delta, activePractice)
   if (!next) return session
   if (!linked) return replace({ status: 'undone', resolvedAt: now }, next)
   const reversal = { ...change, id: `restore:${change.id}`, action: { type: 'RESTORE', taskId: change.action.taskId, params: {} },
     reason: '恢复先前安排并保留学习记录', needsConfirmation: false, dayId: day.id, proposedAt: now, resolvedAt: now,
-    appliedAt: now, delta, restores: change.id }
+    appliedAt: now, appliedRevision: session.revision + 1, dayEffects: appliedDayEffects(session, next, delta),
+    delta, restores: change.id }
   return replace({ revertedBy: reversal.id }, next, reversal)
 }

@@ -14,7 +14,11 @@ const changeLabels = {
 const commandLabels = {
   accept: '接受调整', reject: '保留原安排', undo: '撤销调整', restore: '恢复先前安排',
 }
-const timingText = (timing) => timing && `${timing.interval} ${timing.unit === 'elapsedMinutes' ? '实际分钟' : '个学习日'}`
+const timingText = (timing) => timing && `${timing.interval} ${timing.unit === 'elapsedMinutes' ? '模拟分钟' : '个学习日'}`
+const dayEffects = {
+  updated: '本日实例已更新', scheduled: '已安排在本日', paused: '本日实例已暂停，学习记录已保留',
+  removed: '已移出本日安排', future: '后续学习日按新安排',
+}
 
 function TaskDelta({ before, after, titleFor, tools }) {
   const rows = [
@@ -70,6 +74,9 @@ function ChangeDetails({ change, controls, titleFor, tools, onCommand, busy }) {
         {change.delta.schedule.map(({ taskId, before, after }) => (
           <p key={taskId} className="border-t border-line pt-2"><strong className="text-ink">{titleFor(taskId)}</strong> · {placementText(before)} → {placementText(after)}</p>
         ))}
+        {change.dayEffects?.filter(({ effect }) => effect !== 'future' || status === 'applied').map(({ taskId, effect, estimatedMinutes }) =>
+          <p key={taskId}>{titleFor(taskId)} · {dayEffects[effect]}
+            {estimatedMinutes !== undefined && `（本日实例 ${estimatedMinutes} 分钟）`}</p>)}
         {status === 'pending' && <p>接受后才会应用这项调整。</p>}
         {status === 'expired' && <p>学习安排已有变化，这项建议已失效。</p>}
         {status === 'superseded' && <p>请先处理影响同一任务的后续调整。</p>}

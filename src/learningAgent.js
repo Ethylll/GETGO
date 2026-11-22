@@ -33,6 +33,12 @@ export function restoredAgentState(value, session, now = Date.now()) {
     shortText(change.id, 240) && shortText(change.reason, 220) && ['pending', 'applied', 'rejected', 'undone'].includes(change.status) &&
     Number.isFinite(change.proposedAt) && (change.status !== 'applied' || Number.isFinite(change.appliedAt)) &&
     Array.isArray(change.taskIds) && change.taskIds.every((id) => shortText(id, 180)) &&
+    (change.appliedRevision === undefined || Number.isSafeInteger(change.appliedRevision) && change.appliedRevision > 0) &&
+    (change.dayEffects === undefined || Array.isArray(change.dayEffects) && change.dayEffects.length <= 5 &&
+      change.dayEffects.every((effect) => change.taskIds.includes(effect?.taskId) &&
+        ['updated', 'scheduled', 'paused', 'removed', 'future'].includes(effect.effect) &&
+        (effect.instanceId === undefined || effect.instanceId === `${change.dayId}:${effect.taskId}`) &&
+        (effect.estimatedMinutes === undefined || Number.isSafeInteger(effect.estimatedMinutes) && effect.estimatedMinutes > 0))) &&
     [...AGENT_ACTIONS, 'RESTORE'].includes(change.action?.type) && validStoredPlanDelta(change.delta, evidence)) : []
   const schedule = Array.isArray(input.schedule) ? [...new Map(input.schedule.filter((item) => tasks.has(item?.taskId) &&
     [item.notBefore, item.priorityDay].every((number) => number === undefined || Number.isSafeInteger(number) && number > 0))
@@ -82,7 +88,8 @@ function stepResult(session, round, decision, prepared, actionId, now) {
     ...(prepared.code ? { code: prepared.code } : {}),
     ...(prepared.sources ? { sources: prepared.sources } : {}),
     ...(prepared.note ? { taskId: prepared.note.taskId, noteId: actionId } : {}),
-    ...(prepared.change ? { taskIds: prepared.change.taskIds, changeId: actionId } : {}),
+    ...(prepared.change ? { taskIds: prepared.change.taskIds, changeId: actionId,
+      ...(prepared.change.dayEffects ? { dayEffects: prepared.change.dayEffects } : {}) } : {}),
     ...(prepared.waiting ? { awaitsUser: true } : {}) }
   const recorded = { type: decision.type, reason: decision.reason, issue: decision.issue,
     evidenceIds: prepared.code === 'unknown_evidence' ? [] : decision.evidenceIds,

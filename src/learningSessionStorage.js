@@ -125,7 +125,9 @@ function validInstance(item, day, evidence) {
     !task.steps.every((step) => typeof step?.text === 'string' && step.text.trim() && hasValidSourceRefs(step.sourceRefs, evidence)) ||
     !isValidV2Task(task, task.prerequisiteTaskIds.filter((id) => task.prerequisiteGates?.some((gate) => gate?.taskId === id)), evidence) ||
     typeof item.optional !== 'boolean' || !isStringList(item.feedback) ||
-    (item.held !== undefined && (item.held !== true || item.status !== 'notStarted'))) return false
+    (item.held !== undefined && (item.held !== true || item.status === 'completed')) ||
+    [item.taskVersion, item.startedRevision, item.completedRevision].some((revision) =>
+      revision !== undefined && (!Number.isSafeInteger(revision) || revision < 1))) return false
   const withinDay = (time) => Number.isFinite(time) && time >= day.startedAt && (day.endedAt === null || time <= day.endedAt)
   if (item.status === 'notStarted') return item.startedAt === null && item.completedAt === null && !item.feedback.length
   if (!withinDay(item.startedAt)) return false
@@ -165,8 +167,10 @@ export function saveDailyLearningSession(session, storage) {
     const snapshot = { version: 2, projectId, revision, limits, plan, effectivePlan: effective && { ...effective, sources: undefined },
       days: days.map(({ id, dayNumber, startedAt, endedAt, limits: dayLimits, instances }) => ({
         id, dayNumber, simulatedMinute: simulatedMinute(dayNumber), startedAt, endedAt, limits: dayLimits,
-        instances: instances.map(({ id: instanceId, task, status, startedAt: start, completedAt, optional, feedback, held }) => ({
+        instances: instances.map(({ id: instanceId, task, status, startedAt: start, completedAt, optional, feedback, held,
+          taskVersion, startedRevision, completedRevision }) => ({
           id: instanceId, task: snapshotDailyTask(task), status, startedAt: start, completedAt, optional, feedback,
+          taskVersion, startedRevision, completedRevision,
           ...(held ? { held: true } : {}),
         })),
       })),

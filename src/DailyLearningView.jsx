@@ -31,7 +31,7 @@ function DailyList({ label, items, focusedId, onSelect }) {
 }
 
 function PracticeTiming({ label, timing, tools }) {
-  const unit = timing.unit === 'elapsedMinutes' ? '实际分钟' : '个学习日'
+  const unit = timing.unit === 'elapsedMinutes' ? '模拟分钟' : '个学习日'
   return (
     <div>
       <p>{label} · {timing.interval} {unit} · {timing.basis === 'recommendation' ? 'AI 教学建议' : '原资料安排'}</p>
@@ -122,7 +122,8 @@ function DailyRoute({ plan, day, days, scheduled, done, focusedId, projectQuesti
               </button>}
               {record.instances.length ? <ul>{record.instances.map((item) => (
                 <li key={item.id}><button type="button" className="text-left underline" onClick={() => onHistory(item, record)}>
-                  {item.task.title} · {item.held ? '已调整安排' : item.status === 'completed' ? '已完成' : '未完成'}
+                  {item.task.title} · {item.held ? (item.startedAt === null ? '已调整安排' : '已暂停，曾开始')
+                    : item.status === 'completed' ? '已完成' : '未完成'}
                 </button></li>
               ))}</ul> : <p className="text-xs">该日没有安排任务</p>}
             </details>
