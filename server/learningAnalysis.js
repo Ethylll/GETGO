@@ -162,20 +162,25 @@ function initializeV2Task(proposal, evidenceById) {
     ? frequency.sourceRefs
     : frequency.basis === 'recommendation' ? practiceIntervalRefs(task.sourceRefs, evidenceById) : []
   const intervals = new Set(explicitElapsedMinutes(directFrequency))
-  if (intervals.size !== 1) return task
-  const [interval] = intervals
-  task.practice = { ...task.practice, frequency: { unit: 'elapsedMinutes', interval, basis: 'source', sourceRefs: directFrequency } }
+  if (intervals.size === 1) {
+    const [interval] = intervals
+    task.practice = { ...task.practice, frequency: { unit: 'elapsedMinutes', interval, basis: 'source', sourceRefs: directFrequency } }
+  }
   const review = task.practice.reviewAfter
-  if (review?.basis === 'source' && hasValidSourceRefs(review.sourceRefs, evidenceById) &&
-    practiceIntervalRefs(review.sourceRefs, evidenceById).length === review.sourceRefs.length &&
-    explicitElapsedMinutes(review.sourceRefs).every((minutes) => minutes === interval)) {
-    task.practice.reviewAfter = { unit: 'learningDay', interval: 3, basis: 'recommendation' }
+  if (review?.basis === 'source' && hasValidSourceRefs(review.sourceRefs, evidenceById)) {
+    const reviewIntervals = new Set(explicitElapsedMinutes(review.sourceRefs, 'reviewAfter'))
+    if (reviewIntervals.size === 1) {
+      const [interval] = reviewIntervals
+      task.practice = { ...task.practice, reviewAfter: { ...review, unit: 'elapsedMinutes', interval } }
+    } else if (intervals.size === 1 && practiceIntervalRefs(review.sourceRefs, evidenceById).length === review.sourceRefs.length) {
+      task.practice = { ...task.practice, reviewAfter: { unit: 'learningDay', interval: 3, basis: 'recommendation' } }
+    }
   }
   return task
 }
 
 // Validate each node against independent evidence, then keep only nodes whose dependencies survived.
-export function prunePlan(draft, sources, rejected = new Set(), planVersion = 1) {
+export function prunePlan(draft, sources, rejected = new Set(), planVersion = 1, issues) {
   const evidenceById = indexSourceEvidence(sources)
   const points = new Map()
   const tasks = new Map()
@@ -184,18 +189,31 @@ export function prunePlan(draft, sources, rejected = new Set(), planVersion = 1)
     if (boundedText(point.title, 240) && Array.isArray(point.prerequisiteIds) &&
       point.prerequisiteIds.every((id) => points.has(id)) && hasValidSourceRefs(point.sourceRefs, evidenceById)) {
       points.set(point.id, point)
-    }
+    } else issues?.push({ pointId: point.id, code: 'point_evidence_or_dependency' })
   }
   for (const proposal of draft.tasks) {
     const task = planVersion === 2 ? initializeV2Task(proposal, evidenceById) : proposal
-    if (rejected.has(task.id) || !Array.isArray(task.prerequisiteTaskIds) || !task.prerequisiteTaskIds.every((id) => tasks.has(id)) ||
-      !Array.isArray(task.knowledgePointIds) || !task.knowledgePointIds.length || !task.knowledgePointIds.every((id) => points.has(id)) ||
-      !boundedText(task.title, 240) || !boundedText(task.objective, 350) ||
+    if (rejected.has(task.id)) continue
+    if (!Array.isArray(task.prerequisiteTaskIds) || !task.prerequisiteTaskIds.every((id) => tasks.has(id))) {
+      issues?.push({ taskId: task.id, code: 'task_dependency' })
+      continue
+    }
+    if (!Array.isArray(task.knowledgePointIds) || !task.knowledgePointIds.length || !task.knowledgePointIds.every((id) => points.has(id))) {
+      issues?.push({ taskId: task.id, code: 'task_knowledge_point' })
+      continue
+    }
+    if (!boundedText(task.title, 240) || !boundedText(task.objective, 350) ||
       !hasValidSourceRefs(task.sourceRefs, evidenceById) || !Array.isArray(task.steps) ||
       task.steps.length < 2 || task.steps.length > 5 || !task.steps.every((step) =>
-        boundedText(step?.text, 350) && hasValidSourceRefs(step.sourceRefs, evidenceById))) continue
+        boundedText(step?.text, 350) && hasValidSourceRefs(step.sourceRefs, evidenceById))) {
+      issues?.push({ taskId: task.id, code: 'task_evidence_or_steps' })
+      continue
+    }
     if (planVersion === 2 && !isValidV2Task(task,
-      task.prerequisiteTaskIds.filter((id) => tasks.get(id).type === 'recurring'), evidenceById)) continue
+      task.prerequisiteTaskIds.filter((id) => tasks.get(id).type === 'recurring'), evidenceById)) {
+      issues?.push({ taskId: task.id, code: 'task_v2_fields' })
+      continue
+    }
     tasks.set(task.id, task)
     orderedTasks.push(task)
   }
@@ -219,12 +237,13 @@ export async function generateLearningPlan(request, sources, topic, planVersion 
     typeof value.hasConflict === 'boolean'
   const protocol = planVersion === 2 ? { planVersion, dailyLimits: DEFAULT_LEARNING_DAY_LIMITS } : {}
   const input = { topic, sources: evidence, ...protocol }
-  const prune = (draft, rejected) => prunePlan(draft, sources, rejected, planVersion)
+  const prune = (draft, rejected, issues) => prunePlan(draft, sources, rejected, planVersion, issues)
   const initial = await request('plan', input, 9500, isDraft)
-  const initialCount = initial.status === 'ready' ? prune(initial).tasks.length : 0
+  const issues = []
+  const initialCount = initial.status === 'ready' ? prune(initial, undefined, issues).tasks.length : 0
   const recovery = initial.status === 'unavailable' && initial.hasConflict ? { recoverIndependentTasks: true }
     : initial.status === 'ready' && (!initialCount || (planVersion === 2 && initialCount < initial.tasks.length))
-      ? { repairEvidence: true } : null
+      ? { repairEvidence: true, ...(planVersion === 2 ? { repairIssues: issues.slice(0, 24) } : {}) } : null
   const alternative = recovery ? await request('plan', { ...input, ...recovery }, 9500, isDraft).catch((error) => {
     if (!initialCount) throw error
     return null
@@ -236,12 +255,12 @@ export async function generateLearningPlan(request, sources, topic, planVersion 
   const draft = initialCount && !improves
     ? initial : (alternative ?? initial)
   const reportedConflict = initial.hasConflict || draft.hasConflict
-  const fail = (message, hasConflict = reportedConflict) => analysisResult('unavailable', sources, {
-    message, notices: hasConflict ? [conflictNotice] : [],
+  const fail = (message, reason, hasConflict = reportedConflict) => analysisResult('unavailable', sources, {
+    message, diagnostic: reason, notices: hasConflict ? [conflictNotice] : [],
   })
-  if (draft.status === 'unavailable') return fail(draft.reason)
+  if (draft.status === 'unavailable') return fail(draft.reason, 'plan_declined')
   const candidate = prune(draft)
-  if (!candidate.tasks.length) return fail(noPlan)
+  if (!candidate.tasks.length) return fail(noPlan, 'plan_structure')
 
   const review = await request('review', { ...input, ...candidate }, 2400, (value) => {
     if (!Array.isArray(value?.verdicts) || value.verdicts.length !== candidate.tasks.length) return false
@@ -251,7 +270,7 @@ export async function generateLearningPlan(request, sources, topic, planVersion 
   const rejected = new Set(review.verdicts.filter(({ verdict }) => verdict !== 'supported').map(({ id }) => id))
   const hasConflict = reportedConflict || review.verdicts.some(({ verdict }) => verdict === 'conflict')
   const retained = prune(draft, rejected)
-  if (!retained.tasks.length) return fail(noPlan, hasConflict)
+  if (!retained.tasks.length) return fail(noPlan, 'plan_review', hasConflict)
   const plan = analysisResult('ready', sources, {
     topic, ...retained, ...(planVersion === 2 ? { planVersion } : {}),
     supportedScope: retained.knowledgePoints.map(({ title }) => title).join('、'),
@@ -260,5 +279,5 @@ export async function generateLearningPlan(request, sources, topic, planVersion 
     ])],
     notices: hasConflict ? [conflictNotice] : [],
   })
-  return isValidLearningPlan(plan, sources) ? plan : fail(noPlan, hasConflict)
+  return isValidLearningPlan(plan, sources) ? plan : fail(noPlan, 'plan_structure', hasConflict)
 }

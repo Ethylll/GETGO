@@ -249,6 +249,30 @@ test('明确的下次练习间隔不被当成复核或学习日，独立核验�
   assert.equal(calls.length, 3)
 })
 
+test('R5 自然间隔须有时间和用途依据，真实摘录也不能借作另一种安排', async () => {
+  const reviewText = '48小时后复核折痕。'
+  const durationText = '每次至少练习48分钟，完成后检查折痕。'
+  const withTiming = { ...source, text: note + reviewText + durationText }
+  for (const excerpt of [recurring.sourceRefs[0].excerpt, durationText, reviewText]) {
+    const invalid = asV2(recurring, { type: 'recurring', practice: { ...practice, frequency: {
+      unit: 'elapsedMinutes', interval: excerpt === durationText ? 48 : 2880, basis: 'source', sourceRefs: refs(excerpt),
+    } } })
+    const envelope = { ...proposal([invalid]), topic: topic.topic, supportedScope: '折纸', planVersion: 2, entryTaskId: invalid.id }
+    assert.equal(isValidLearningPlan(envelope, [withTiming]), false)
+    const { service, calls } = setup({ plan: () => success(proposal([invalid])) })
+    const result = await service.planLearning({ sources: [withTiming], planVersion: 2 })
+    assert.equal(result.status, 'unavailable')
+    assert.equal(result.diagnostic, 'plan_structure')
+    assert.deepEqual(JSON.parse(calls[2].data).repairIssues, [{ taskId: invalid.id, code: 'task_v2_fields' }])
+    assert.equal(calls.length, 3)
+  }
+  const reviewed = asV2(recurring, { type: 'recurring', practice: { ...practice, reviewAfter: {
+    unit: 'elapsedMinutes', interval: 2880, basis: 'source', sourceRefs: refs(reviewText),
+  } } })
+  assert.equal(isValidLearningPlan({ ...proposal([reviewed]), topic: topic.topic, supportedScope: '折纸',
+    planVersion: 2, entryTaskId: reviewed.id }, [withTiming]), true)
+})
+
 test('V2 移除循环、无效前置、伪造周期引用和未通过独立核验的任务及依赖', async () => {
   const { service, calls } = setup({
     plan: () => success(proposal([

@@ -14,7 +14,7 @@
 
 ## V2 任务协议
 
-本节为规划 Prompt v2.1。上面的示例只说明共用字段，遇到 planVersion 2 时还必须提供下面的新字段。
+本节为规划 Prompt v2.2。上面的示例只说明共用字段，遇到 planVersion 2 时还必须提供下面的新字段。repairIssues 提供上一次结构检查发现的问题类型及候选节点 ID。根据本次输入原文修复能支持的任务和依赖；所有可独立核验的单次及周期任务都应保留。
 
 在上述输出的每项任务内增加 type（oneTime 或 recurring）、estimatedMinutes（1 至 dailyLimits.minutes 的整数）、completionCriteria（当次可观察结果）及 prerequisiteGates 数组。时长是教学估算，不需填满每日配额；一项任务应能在一日内执行。程序另行填写初始状态。适合反复训练的实践任务用 recurring；准备、理解过程或单次操作用 oneTime。不要求路线中一定有周期任务，也不把单次完成或累计次数当作技能掌握。有实际可并行内容时，不将周期练习设为后续新知的默认前置。
 

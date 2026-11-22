@@ -1,4 +1,4 @@
-import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidV2Task } from './services/validateLearningPlan.js'
+import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidPracticeTiming, isValidV2Task } from './services/validateLearningPlan.js'
 import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT, validatedLearningFeedback } from './chatMessages.js'
 import { sourceText } from './learningSources.js'
 import { activeLearningPlan, simulatedMinute, snapshotDailyTask } from './learningDays.js'
@@ -13,9 +13,9 @@ function isStringList(value) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
-function isValidStoredPlan(plan) {
+function isValidStoredPlan(plan, historicalTiming = false) {
   if (plan?.status !== 'ready' || !['mock', 'real'].includes(plan.mode) ||
-    !isStringList(plan.coverageGaps) || !isStringList(plan.notices) || !isValidLearningPlan(plan, plan.sources)) {
+    !isStringList(plan.coverageGaps) || !isStringList(plan.notices) || !isValidLearningPlan(plan, plan.sources, historicalTiming)) {
     return false
   }
 
@@ -119,14 +119,14 @@ function validLimits(limits) {
   return Number.isSafeInteger(limits?.minutes) && limits.minutes > 0 && Number.isSafeInteger(limits.tasks) && limits.tasks > 0
 }
 
-function validInstance(item, day, evidence) {
+function validInstance(item, day, evidence, historicalTiming) {
   const task = item?.task
   if (typeof task?.id !== 'string' || !task.id || item.id !== `${day.id}:${task.id}` ||
     typeof task.title !== 'string' || !task.title.trim() || typeof task.objective !== 'string' || !task.objective.trim() ||
     !isStringList(task.prerequisiteTaskIds) || !isStringList(task.knowledgePointIds) || !task.knowledgePointIds.length ||
     !Array.isArray(task.steps) || task.steps.length < 2 || task.steps.length > 5 || !hasValidSourceRefs(task.sourceRefs, evidence) ||
     !task.steps.every((step) => typeof step?.text === 'string' && step.text.trim() && hasValidSourceRefs(step.sourceRefs, evidence)) ||
-    !isValidV2Task(task, task.prerequisiteTaskIds.filter((id) => task.prerequisiteGates?.some((gate) => gate?.taskId === id)), evidence) ||
+    !isValidV2Task(task, task.prerequisiteTaskIds.filter((id) => task.prerequisiteGates?.some((gate) => gate?.taskId === id)), evidence, historicalTiming) ||
     typeof item.optional !== 'boolean' || !isStringList(item.feedback) ||
     (item.held !== undefined && (item.held !== true || item.status === 'completed')) ||
     [item.taskVersion, item.startedRevision, item.completedRevision].some((revision) =>
@@ -138,12 +138,12 @@ function validInstance(item, day, evidence) {
   return item.status === 'completed' && withinDay(item.completedAt) && item.completedAt >= item.startedAt
 }
 
-function validDailySession(session) {
+function validDailySession(session, historicalTiming = false) {
   const { plan, effectivePlan, projectId, revision, limits, days } = session
-  if (plan?.planVersion !== 2 || !isValidStoredPlan(plan) || typeof projectId !== 'string' || !projectId ||
+  if (plan?.planVersion !== 2 || !isValidStoredPlan(plan, historicalTiming) || typeof projectId !== 'string' || !projectId ||
     !Number.isSafeInteger(revision) || revision < 0 || !validLimits(limits) || !Array.isArray(days) || !days.length) return false
   if (effectivePlan !== null && (effectivePlan?.planVersion !== 2 ||
-    !isValidStoredPlan({ ...effectivePlan, sources: plan.sources }))) return false
+    !isValidStoredPlan({ ...effectivePlan, sources: plan.sources }, historicalTiming))) return false
   const evidence = indexSourceEvidence(plan.sources)
   return days.every((day, index) => {
     if (day?.id !== `day-${index + 1}` || day.dayNumber !== index + 1 || !Number.isFinite(day.startedAt) || day.startedAt < 0 ||
@@ -151,12 +151,31 @@ function validDailySession(session) {
       (index > 0 && day.startedAt !== days[index - 1].endedAt) ||
       (index === days.length - 1 ? day.endedAt !== null : !Number.isFinite(day.endedAt) || day.endedAt < day.startedAt) ||
       !validLimits(day.limits) || !Array.isArray(day.instances) ||
-      !day.instances.every((item) => validInstance(item, day, evidence))) return false
+      !day.instances.every((item) => validInstance(item, day, evidence, historicalTiming || day.endedAt !== null ||
+        item.status === 'completed' || item.held))) return false
     const scheduled = day.instances.filter((item) => !item.held)
     return new Set(day.instances.map(({ id }) => id)).size === day.instances.length &&
       scheduled.length <= day.limits.tasks &&
       scheduled.reduce((sum, { task }) => sum + task.estimatedMinutes, 0) <= day.limits.minutes
   })
+}
+
+function restoreLegacyTiming(snapshot) {
+  if (!validDailySession(snapshot, true)) return null
+  const evidence = indexSourceEvidence(snapshot.plan.sources)
+  const normalize = (task) => {
+    if (!task.practice) return task
+    const keepOrRecommend = (key, interval) => isValidPracticeTiming(task.practice[key], evidence, key)
+      ? task.practice[key] : { unit: 'learningDay', interval, basis: 'recommendation' }
+    return { ...task, practice: { ...task.practice, frequency: keepOrRecommend('frequency', 1),
+      reviewAfter: keepOrRecommend('reviewAfter', 3) } }
+  }
+  const effective = snapshot.effectivePlan
+  const open = snapshot.days.at(-1)
+  return { ...snapshot, plan: { ...snapshot.plan, tasks: snapshot.plan.tasks.map(normalize) },
+    effectivePlan: effective && { ...effective, tasks: effective.tasks.map(normalize) },
+    days: [...snapshot.days.slice(0, -1), { ...open, instances: open.instances.map((item) =>
+      item.status === 'completed' || item.held ? item : { ...item, task: normalize(item.task) }) }] }
 }
 
 export function saveDailyLearningSession(session, storage) {
@@ -199,10 +218,11 @@ export function loadLearningSession(storage) {
   if (raw === null) return { status: 'empty' }
 
   try {
-    const snapshot = JSON.parse(raw)
+    let snapshot = JSON.parse(raw)
     if (!snapshot || typeof snapshot !== 'object') return { status: 'invalid', reason: 'data' }
     if (snapshot.version === 2) {
-      if (!validDailySession(snapshot)) return { status: 'invalid', reason: 'data' }
+      if (!validDailySession(snapshot)) snapshot = restoreLegacyTiming(snapshot)
+      if (!snapshot) return { status: 'invalid', reason: 'data' }
       const agent = snapshot.agent ? restoredAgentState(snapshot.agent, snapshot) : undefined
       const messages = storedMessages(snapshot.messages, snapshot.plan, { ...snapshot, agent })
       const days = snapshot.days.map((day) => ({ ...day, simulatedMinute: simulatedMinute(day.dayNumber) }))

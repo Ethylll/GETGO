@@ -182,6 +182,22 @@ test('仍打开的 V1 学习视图不能覆盖已存在的 V2 会话', () => {
   assert.equal(loadLearningSession(storage).session.projectId, session.projectId)
 })
 
+test('旧快照保留已封存练习，对缺时间依据的旧频率恢复为教学建议', () => {
+  const storage = memoryStorage()
+  const legacy = advance(finish(newSession(), 'practice'))
+  assert.ok(saveDailyLearningSession(legacy, storage))
+  const snapshot = JSON.parse(storage.getItem(LEARNING_SESSION_KEY))
+  const unsupported = { unit: 'elapsedMinutes', interval: 99, basis: 'source', sourceRefs }
+  snapshot.plan.tasks.find(({ id }) => id === 'practice').practice.frequency = unsupported
+  for (const day of snapshot.days) day.instances.find(({ task }) => task.id === 'practice').task.practice.frequency = unsupported
+  storage.setItem(LEARNING_SESSION_KEY, JSON.stringify(snapshot))
+  const restored = loadLearningSession(storage)
+  assert.equal(restored.status, 'restored')
+  assert.deepEqual(restored.session.plan.tasks.find(({ id }) => id === 'practice').practice.frequency, practice.frequency)
+  assert.deepEqual(restored.session.days[0].instances.find(({ task }) => task.id === 'practice').task.practice.frequency, unsupported)
+  assert.ok(saveDailyLearningSession(restored.session, storage))
+})
+
 test('新项目在部分读取失败及澄清后仍按 V2 协议规划', async () => {
   const plan = makePlan()
   const stages = []

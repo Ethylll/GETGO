@@ -25,7 +25,7 @@ for (const fixture of selected) {
   const result = read.status === 'ready'
     ? await service.planLearning({ sources: read.sources, confirmPartial: true, planVersion: v2 ? 2 : 1,
       onStage: (stage) => stages.push(stage) }) : read
-  const { status, topic, tasks, knowledgePoints, entryTaskId, message, coverageGaps, notices } = result
+  const { status, topic, tasks, knowledgePoints, entryTaskId, message, coverageGaps, notices, diagnostic } = result
   const bySource = new Map(read.sources.map((source) => [source.sourceId, source]))
   const refs = tasks?.flatMap((task) => [...task.sourceRefs, ...task.steps.flatMap((step) => step.sourceRefs)]) ?? []
   const valid = status !== 'ready' || isValidLearningPlan(result, read.sources)
@@ -38,7 +38,7 @@ for (const fixture of selected) {
       (fixture.frequency.interval === undefined || practice.frequency.interval === fixture.frequency.interval))))
   if (status !== (fixture.status ?? 'ready') || !valid || !locates ||
     !v2Matches || (fixture.id.startsWith('conflict') && !notices.some((notice) => notice.includes('冲突')))) failures++
-  console.log(JSON.stringify({ id: fixture.id, status, topic, stages, valid, locates, v2Matches, entryTaskId, message, coverageGaps, notices,
+  console.log(JSON.stringify({ id: fixture.id, status, topic, stages, valid, locates, v2Matches, entryTaskId, message, diagnostic, coverageGaps, notices,
     sourceResults: read.sources.filter((source) => source.type === 'image').map(({ status, extractedText, error }) => ({ status, extractedText, error })),
     knowledge: knowledgePoints?.map(({ title, prerequisiteIds }) => ({ title, prerequisiteIds })),
     tasks: tasks?.map(({ id, title, prerequisiteTaskIds, steps, type, estimatedMinutes, completionCriteria, practice, prerequisiteGates }) =>

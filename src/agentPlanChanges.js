@@ -217,7 +217,7 @@ export function validStoredPlanDelta(delta, evidence) {
     Array.isArray(task.knowledgePointIds) && Array.isArray(task.steps) && task.steps.length >= 2 && task.steps.length <= 5 &&
     task.steps.every((step) => shortText(step?.text, 600) && hasValidSourceRefs(step.sourceRefs, evidence)) &&
     hasValidSourceRefs(task.sourceRefs, evidence) && Array.isArray(task.prerequisiteGates) &&
-    isValidV2Task(task, task.prerequisiteTaskIds.filter((key) => task.prerequisiteGates.some((gate) => gate?.taskId === key)), evidence))
+    isValidV2Task(task, task.prerequisiteTaskIds.filter((key) => task.prerequisiteGates.some((gate) => gate?.taskId === key)), evidence, true))
   const validPlacement = (item, id) => item === null || (item?.taskId === id &&
     [item.notBefore, item.priorityDay].every((day) => day === undefined || integer(day, 1, Number.MAX_SAFE_INTEGER)))
   return delta.tasks.every((item) => shortText(item?.taskId, 180) && (item.before !== null || item.after !== null) &&
