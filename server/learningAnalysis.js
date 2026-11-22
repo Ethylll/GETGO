@@ -150,8 +150,7 @@ function evidenceFor(sources) {
 
 function practiceIntervalRefs(refs, evidenceById) {
   return (Array.isArray(refs) ? refs : []).filter((ref) => hasValidSourceRefs([ref], evidenceById) &&
-    /下[一两]次[^。；]{0,12}练习|再[^。；]{0,12}练习|两次[^。；]{0,12}练习|每次练习|重复一次/u.test(ref.excerpt) &&
-    !/复核|复查|复盘|回顾|评估/u.test(ref.excerpt) && explicitElapsedMinutes([ref]).length > 0)
+    explicitElapsedMinutes([ref]).length > 0)
 }
 
 function initializeV2Task(proposal, evidenceById) {

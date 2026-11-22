@@ -116,7 +116,7 @@ function DailyRoute({ plan, day, days, scheduled, done, focusedId, projectQuesti
           <h3 className="font-semibold">历史学习日</h3>
           {[...days.slice(0, -1)].reverse().map((record) => (
             <details key={record.id} className="mt-1 border-t border-line py-1">
-              <summary className="cursor-pointer">Day {record.dayNumber} · 完成 {record.instances.filter(({ status }) => status === 'completed').length}/{record.instances.filter(({ held }) => !held).length}</summary>
+              <summary className="cursor-pointer">Day {record.dayNumber} · 完成 {record.instances.filter(({ status }) => status === 'completed').length}/{record.instances.filter(({ held, startedAt }) => !held || startedAt !== null).length}</summary>
               {projectQuestionDays.has(record.id) && <button type="button" className="text-left underline" onClick={() => onProjectHistory(record)}>
                 查看 Day {record.dayNumber} 项目答疑
               </button>}

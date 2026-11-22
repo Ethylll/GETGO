@@ -1,7 +1,7 @@
 import { activeLearningPlan } from './learningDays.js'
 import { appliedDayEffects, applyPlanDelta, canReversePlanDelta, equalAgentData, groundedStep, onlyKeys, planChangeFor, reversePlanDelta, shortText } from './agentPlanChanges.js'
 import { sourceText } from './learningSources.js'
-import { occursAfter, practiceAfterChange } from './learningObservation.js'
+import { occursAfter, outstandingPracticeTasks, practiceAfterChange } from './learningObservation.js'
 import { indexSourceEvidence } from './services/validateLearningPlan.js'
 
 export const AGENT_ACTIONS = ['KEEP_PLAN', 'GUIDE', 'CLARIFY', 'DECOMPOSE_TASK', 'ADJUST_PRACTICE', 'RESCHEDULE', 'CHECK_MASTERY', 'SEARCH_SOURCES']
@@ -152,7 +152,7 @@ export function prepareAgentAction(session, frame, receipts, decision, actionId,
       equalAgentData(change.action, action))
     if (alreadyPending) return { code: 'already_pending' }
     const adjustment = session.agent.changes.findLast((change) => change.status === 'applied' && !change.revertedBy && change.taskIds.includes(taskId))
-    if (adjustment && !practiceAfterChange(session.days, adjustment).length && !(decision.exception &&
+    if (adjustment && outstandingPracticeTasks(session, adjustment).length && !practiceAfterChange(session, adjustment).length && !(decision.exception &&
       hasNewFeedback(session, decision, taskId, adjustment.appliedRevision, adjustment.appliedAt, ['difficulty', 'time', 'direction']))) {
       return { code: 'awaiting_practice' }
     }

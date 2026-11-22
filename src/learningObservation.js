@@ -1,5 +1,6 @@
+import { equalAgentData } from './agentPlanChanges.js'
 import { validatedLearningFeedback } from './chatMessages.js'
-import { activeLearningPlan, getOneTimeProgress, simulatedMinute } from './learningDays.js'
+import { activeLearningPlan, countsAsLearningOffer, getOneTimeProgress, simulatedMinute } from './learningDays.js'
 import { sourceText } from './learningSources.js'
 
 const EVENT_LIMIT = 32
@@ -79,35 +80,76 @@ function describeInstance(item, day) {
     selfChecks: item.feedback.slice(0, 4).map((value) => field(value, 120)) }
 }
 
-export function practiceAfterChange(days, change, taskIds = change.taskIds) {
-  const firstDay = days.findIndex(({ id }) => change.dayId === id)
-  if (firstDay < 0) return []
-  return days.slice(firstDay).flatMap((day, index) => day.instances.filter((instance) => {
-    if (!taskIds.includes(instance.task.id) || instance.held || instance.startedAt === null) return false
-    if (index > 0) return true
+function practiceTaskIds(change, taskIds) {
+  if (!change.delta) return taskIds
+  const { tasks, schedule } = change.delta
+  return taskIds.filter((id) => tasks.some(({ taskId, after }) => taskId === id && after) ||
+    (schedule.some(({ taskId }) => taskId === id) && !tasks.some(({ taskId, after }) => taskId === id && !after)))
+}
+
+function laterChangesForTask(changes, change, taskId) {
+  if (!change.delta) return []
+  return changes.filter((later) => later.status === 'applied' &&
+    occursAfter(later.appliedRevision, later.appliedAt, change.appliedRevision, change.appliedAt) &&
+    ['tasks', 'schedule'].some((key) => change.delta[key].some((item) => item.taskId === taskId) &&
+      later.delta?.[key].some((item) => item.taskId === taskId)))
+}
+
+export function outstandingPracticeTasks(session, change, taskIds = change.taskIds) {
+  return practiceTaskIds(change, taskIds).filter((id) =>
+    !laterChangesForTask(session.agent?.changes ?? [], change, id).length)
+}
+
+export function practiceAfterChange({ days, agent }, change, taskIds = change.taskIds) {
+  const dayNumbers = new Map(days.map(({ id, dayNumber }) => [id, dayNumber]))
+  const firstDay = dayNumbers.get(change.dayId)
+  if (firstDay === undefined) return []
+  const versions = new Map(practiceTaskIds(change, taskIds).map((id) => [id, {
+    task: change.delta?.tasks.find(({ taskId }) => taskId === id)?.after,
+    replacements: laterChangesForTask(agent?.changes ?? [], change, id),
+  }]))
+  return days.slice(firstDay - 1).flatMap((day) => day.instances.filter((instance) => {
+    const version = versions.get(instance.task.id)
+    if (!version || instance.startedAt === null || (version.task && !equalAgentData(version.task, instance.task))) return false
+    // A newer arrangement may leave today's instance in place when it only takes effect on a later day.
+    if (version.replacements.some((later) => {
+      const replacementDay = dayNumbers.get(later.dayId)
+      if (replacementDay === undefined || replacementDay > day.dayNumber) return false
+      if (replacementDay < day.dayNumber) return true
+      return later.dayEffects?.some(({ instanceId, effect }) => instanceId === instance.id &&
+        ['updated', 'scheduled'].includes(effect)) && instance.taskVersion === later.appliedRevision
+    })) return false
+    if (day.dayNumber > firstDay) return true
     const effect = change.dayEffects?.find(({ instanceId }) => instanceId === instance.id)?.effect
     if (change.dayEffects && !['updated', 'scheduled', 'paused'].includes(effect)) return false
-    if (instance.taskVersion !== undefined && change.appliedRevision !== undefined &&
+    if (!version.task && instance.taskVersion !== undefined && change.appliedRevision !== undefined &&
       ['updated', 'scheduled'].includes(effect) && instance.taskVersion !== change.appliedRevision) return false
     return occursAfter(instance.startedRevision, instance.startedAt, change.appliedRevision, change.appliedAt) ||
       Boolean(change.dayEffects) && occursAfter(instance.completedRevision, instance.completedAt, change.appliedRevision, change.appliedAt)
   }).map((instance) => ({ instance, day })))
 }
 
-function describeAdjustments(adjustments, days, knownTasks, turns) {
-  return adjustments.filter((item) => item?.status === 'applied' && typeof item.id === 'string' &&
+function describeAdjustments(adjustments, session, knownTasks, turns) {
+  const { days, agent } = session
+  return adjustments.filter((item) => item?.status === 'applied' && !item.revertedBy && typeof item.id === 'string' &&
     Number.isFinite(item.appliedAt) && days.some(({ id }) => item.dayId === id) &&
     Array.isArray(item.taskIds) && item.taskIds.some((id) => knownTasks.has(id))).slice(-ADJUSTMENT_LIMIT).map((item) => {
     const taskIds = item.taskIds.filter((id) => knownTasks.has(id)).slice(0, TASK_LIMIT)
     const firstDay = days.findIndex(({ id }) => id === item.dayId)
-    const practice = practiceAfterChange(days, item, taskIds)
+    const practiceIds = practiceTaskIds(item, taskIds)
+    const practice = practiceAfterChange(session, item, taskIds)
+    const outstanding = outstandingPracticeTasks(session, item, taskIds)
+    const supersededTaskIds = practiceIds.filter((id) => !outstanding.includes(id))
     const followUp = turns.filter((turn) => taskIds.includes(turn.taskId) && (turn.feedback || turn.clarificationId) &&
-      occursAfter(turn.createdRevision, turn.createdAt, item.appliedRevision, item.appliedAt))
+      occursAfter(turn.createdRevision, turn.createdAt, item.appliedRevision, item.appliedAt) &&
+      !laterChangesForTask(agent?.changes ?? [], item, turn.taskId).some((later) =>
+        occursAfter(turn.createdRevision, turn.createdAt, later.appliedRevision, later.appliedAt)))
     return { receiptId: `receipt:${item.id}`, action: field(item.action, 40), appliedAt: item.appliedAt, taskIds,
       dayNumber: days[firstDay].dayNumber,
       ...(item.dayEffects ? { dayEffects: item.dayEffects } : {}),
+      ...(supersededTaskIds.length ? { supersededTaskIds } : {}),
       subsequentPractice: practice.slice(-3).map(({ instance, day }) => describeInstance(instance, day)),
-      waitingForPractice: practice.length === 0,
+      waitingForPractice: practice.length === 0 && outstanding.length > 0,
       subsequentFeedback: followUp.slice(-3).map(({ id, dayId, taskId, feedback, clarificationId, question }) => ({
         evidenceId: `message:${id}`, dayId, taskId, feedback, ...(clarificationId ? { clarificationId, reply: field(question, 320) } : {}),
       })) }
@@ -155,14 +197,13 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
   }
   const recentDays = session.days.slice(-DAY_LIMIT).map((day) => ({
     id: day.id, dayNumber: day.dayNumber, simulatedMinute: simulatedMinute(day.dayNumber), closed: day.endedAt !== null,
-    instanceCount: day.instances.filter(({ held }) => !held).length,
+    instanceCount: day.instances.filter(({ held, startedAt }) => !held || (day.endedAt !== null && startedAt !== null)).length,
     instances: day.instances.slice(0, 8).map((item) => describeInstance(item, day)),
   }))
   const oneTime = getOneTimeProgress(session.days)
   const summaries = selectedTasks.map((id) => {
     const records = instances.filter(({ task }) => task.id === id)
-    const previous = records.filter(({ id: instanceId, optional, startedAt, held }) =>
-      !held && !instanceId.startsWith(`${current.id}:`) && (!optional || startedAt !== null))
+    const previous = records.filter((item) => item.day.endedAt !== null && countsAsLearningOffer(item))
     const missed = previous.findLastIndex(({ status }) => status === 'completed')
     return { taskId: id, completedInstances: records.filter(({ status }) => status === 'completed').length,
       consecutiveUnfinishedOffers: previous.slice(missed + 1).length,
@@ -181,7 +222,7 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
       evidenceId: `message:${id}`, dayId, dayNumber: daysById.get(dayId)?.dayNumber, instanceId, taskId, question: field(question, 320),
       helpProvided: field(answer, 320), status, feedback, ...(clarificationId ? { clarificationId, submittedOnDayId } : {}),
     })),
-    adjustments: describeAdjustments(adjustments, session.days, knownTasks, turns),
+    adjustments: describeAdjustments(adjustments, session, knownTasks, turns),
   }
 }
 

@@ -276,6 +276,90 @@ test('R2/R3 有旧问答的进行中练习确实更新，完成按新版本进�
   assert.equal(store.read().agent.rounds.at(-1).status, 'kept')
 })
 
+test('FR-1 已开始的 48 小时练习延期后按上次尝试计时，刷新保留未完成证据', async () => {
+  const frequency = { unit: 'elapsedMinutes', interval: 2880, basis: 'source',
+    sourceRefs: [{ sourceId: 'src_1', excerpt: '两次练习相隔48小时。' }] }
+  const store = fixture(makePlan([makeTask('practice', { type: 'recurring', practice: { ...practice, frequency } })]))
+  store.commit((state) => progress(progress(state, 'start', 'practice'), 'complete', 'practice'))
+  store.nextDay()
+  assert.deepEqual(currentDayInstances(store.read()), [])
+  const thirdDay = store.nextDay()
+  store.commit((state) => progress(state, 'start', 'practice', at + 550))
+  const proposed = await simulate(store, thirdDay, ({ receipts }) => receipts.length ? stop('wait')
+    : act('RESCHEDULE', 'practice', { operation: 'defer', days: 1 }))
+  assert.equal(proposed.round.steps[0].receipt.status, 'pendingConfirmation')
+  const id = proposed.round.steps[0].receipt.changeId
+  const accepted = store.commit((state) => resolveAgentChange(state, id, 'accept', at + 2_000))
+  assert.equal(progress(accepted, 'complete', 'practice'), accepted)
+  const fourthDay = store.nextDay()
+  const restored = loadLearningSession(store.storage).session
+  const attempt = restored.days[2].instances[0]
+  assert.equal(attempt.status, 'inProgress')
+  assert.equal(attempt.startedAt, at + 550)
+  assert.equal(attempt.completedAt, null)
+  assert.equal(attempt.held, true)
+  const observed = await simulate(store, fourthDay, () => act('KEEP_PLAN'))
+  const { recentDays, summaries } = observed.seen[0].frame
+  assert.deepEqual({ fourthDayTasks: currentDayInstances(restored).map(({ task }) => task.id),
+    missed: summaries[0].consecutiveUnfinishedOffers }, { fourthDayTasks: [], missed: 1 })
+  assert.equal(recentDays[2].instanceCount, 1)
+  assert.equal(recentDays[2].instances[0].outcome, 'unfinished')
+  assert.equal(summaries[0].latestPractice.at(-1).id, attempt.id)
+  store.nextDay()
+  assert.equal(today(store.read()).simulatedMinute, 5760)
+  assert.deepEqual(currentDayInstances(store.read()).map(({ id }) => id), ['day-5:practice'])
+})
+
+test('FR-2 连续跨日调整只归属实际练习的版本，最新版本依旧受等待保护', async () => {
+  const store = fixture()
+  const first = await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 4 }))
+  const firstReceipt = first.round.steps[0].receipt
+  assert.equal(firstReceipt.status, 'applied')
+  const event = store.feedback('shorter-break', '课间时间变了，现在只剩两分钟，四分钟的练习还是做不完。', 'practice', 'time')
+  const second = await simulate(store, event, ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 2 }, { exception: 'newSevereDifficulty', evidenceIds: ['message:shorter-break'] }))
+  const secondReceipt = second.round.steps[0].receipt
+  assert.equal(secondReceipt.status, 'applied')
+  assert.equal(firstReceipt.dayEffects[0].estimatedMinutes, 4)
+  assert.equal(secondReceipt.dayEffects[0].estimatedMinutes, 2)
+  const waiting = await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 1 }))
+  assert.equal(waiting.round.steps[0].receipt.code, 'awaiting_practice')
+  assert.equal(today(store.read()).instances.find(({ task }) => task.id === 'practice').task.estimatedMinutes, 2)
+  store.commit((state) => progress(progress(state, 'start', 'practice'), 'complete', 'practice'))
+  const followed = await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 3 }))
+  const [older, newer] = followed.seen[0].frame.adjustments
+  assert.deepEqual(older.subsequentPractice, [])
+  assert.equal(older.waitingForPractice, false)
+  assert.deepEqual(older.supersededTaskIds, ['practice'])
+  assert.equal(newer.waitingForPractice, false)
+  assert.deepEqual(newer.subsequentPractice.map(({ id, status }) => [id, status]), [['day-3:practice', 'completed']])
+  assert.equal(followed.round.steps[0].receipt.status, 'applied')
+})
+
+test('FR-2 恢复成相同的练习内容后，新实践只归属恢复变更', async () => {
+  const store = fixture()
+  await simulate(store, store.nextDay(), ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 4 }))
+  const event = store.feedback('new-time-limit', '我现在只剩两分钟可以练。', 'practice', 'time')
+  const second = await simulate(store, event, ({ receipts }) => receipts.length ? stop()
+    : act('ADJUST_PRACTICE', 'practice', { minutes: 2 }, { exception: 'newSevereDifficulty', evidenceIds: ['message:new-time-limit'] }))
+  const id = second.round.steps[0].receipt.changeId
+  store.commit((state) => progress(progress(state, 'start', 'practice'), 'complete', 'practice'))
+  const restored = store.commit((state) => resolveAgentChange(state, id, 'restore', at + 2_000))
+  assert.equal(task(restored, 'practice').estimatedMinutes, 4)
+  assert.equal(today(restored).instances.find(({ task }) => task.id === 'practice').task.estimatedMinutes, 2)
+  store.nextDay()
+  store.commit((state) => progress(progress(state, 'start', 'practice'), 'complete', 'practice'))
+  const observed = await simulate(store, store.nextDay(), () => act('KEEP_PLAN'))
+  const [older, restoration] = observed.seen[0].frame.adjustments
+  assert.deepEqual(older.subsequentPractice, [])
+  assert.deepEqual(older.supersededTaskIds, ['practice'])
+  assert.deepEqual(restoration.subsequentPractice.map(({ id }) => id), ['day-3:practice'])
+})
+
 test('配额保留旧实例时，执行回执明确仅后续生效，旧实例完成不算新练习', async () => {
   const store = fixture(makePlan(), undefined, { minutes: 12, tasks: 2 })
   const event = store.nextDay()

@@ -8,6 +8,8 @@
 
 Day N 是模拟自然日。每次推进增加 1440 模拟分钟。closed 学习日的 unfinished 是未完成事实，仍须区分 notStarted 和 inProgress；open 表示当天尚在学习。held 表示调整后不再要求执行的实例。未完成原因要依据用户反馈和实际表现，不由天数推断。
 
+已应用调整的 subsequentPractice 只列相应安排下的实际尝试。supersededTaskIds 表示已被后续调整替代的任务。判断一项调整的效果时，只使用该项调整下的实际表现及相关反馈。
+
 常规学习没有新困难时，优先发出 KEEP_PLAN，示例 `{"type":"act","reason":"目前按原安排继续学习即可","evidenceIds":[],"action":{"type":"KEEP_PLAN","params":{}}}`。这不需要再询问用户。等待保留给本轮确实需要用户回复或观察实际实践的情况。
 
 当 frame.clarification 出现时，按 promptId 和 replyId 对照先前问题和本轮用户原话。回复可能来自旧任务或较早学习日，以记录归属为准。用户已说明原因时避免再问相同的问题；回复只代表用户的说明，不能证明已经掌握。

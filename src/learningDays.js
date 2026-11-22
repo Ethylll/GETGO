@@ -26,14 +26,15 @@ export function snapshotDailyTask(task) {
 
 export const activeLearningPlan = ({ plan, effectivePlan }) => effectivePlan ? { ...effectivePlan, sources: plan.sources } : plan
 export const simulatedMinute = (dayNumber) => (dayNumber - 1) * 1440
+export const countsAsLearningOffer = ({ startedAt, held, optional }) => startedAt !== null || (!held && !optional)
 
 function taskRecords(days) {
   const records = new Map()
   for (const day of days) {
     for (const instance of day.instances) {
-      if (instance.held) continue
+      if (!countsAsLearningOffer(instance)) continue
       const record = { ...records.get(instance.task.id) }
-      if (!instance.optional || instance.startedAt !== null) record.offeredDay = day.dayNumber
+      record.offeredDay = day.dayNumber
       if (instance.startedAt !== null) record.lastPracticedMinute = simulatedMinute(day.dayNumber)
       if (instance.status === 'completed') {
         record.completed = true

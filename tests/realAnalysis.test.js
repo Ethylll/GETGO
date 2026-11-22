@@ -273,6 +273,41 @@ test('R5 自然间隔须有时间和用途依据，真实摘录也不能借作�
     planVersion: 2, entryTaskId: reviewed.id }, [withTiming]), true)
 })
 
+test('FR-3 单次时长、练习后休息和复核不能充当两次练习间隔', async () => {
+  const restAfterPractice = '每次练习6分钟后休息。'
+  const restWithinPractice = '每次练习中，每隔5分钟休息一次。'
+  const restBetweenMoves = '每隔5分钟休息1分钟再练。'
+  const timedReview = '48小时后复核折痕。'
+  const betweenPractices = '每次练习后休息至少48小时再进行下一次练习。'
+  const imported = { ...source, text: note + restAfterPractice + restWithinPractice + restBetweenMoves + timedReview + betweenPractices }
+  const elapsed = (interval, excerpt) => ({ unit: 'elapsedMinutes', interval, basis: 'source', sourceRefs: refs(excerpt) })
+  for (const [excerpt, interval] of [[restAfterPractice, 6], [restWithinPractice, 5], [restBetweenMoves, 1], [timedReview, 2880]]) {
+    const candidate = { ...recurring, practice: { ...practice, frequency: elapsed(interval, excerpt) } }
+    const draft = proposal([candidate])
+    const { service, calls } = setup({ plan: () => success(draft),
+      review: () => success({ verdicts: [{ id: candidate.id, verdict: 'supported' }] }) })
+    const plan = await service.planLearning({ sources: [imported], planVersion: 2 })
+    const valid = isValidLearningPlan({ ...draft, topic: topic.topic, supportedScope: '折纸',
+      planVersion: 2, entryTaskId: candidate.id }, [imported])
+    assert.deepEqual({ status: plan.status, valid }, { status: 'unavailable', valid: false }, excerpt)
+    assert.ok(calls.every(({ stage }) => !stage.includes('独立核验')))
+  }
+  const candidate = { ...recurring, sourceRefs: [...recurring.sourceRefs, ...refs(restAfterPractice)],
+    practice: { ...practice, frequency: elapsed(2880, betweenPractices), reviewAfter: elapsed(2880, timedReview) } }
+  const { service } = setup({ plan: () => success(proposal([candidate])),
+    review: () => success({ verdicts: [{ id: candidate.id, verdict: 'supported' }] }) })
+  const plan = await service.planLearning({ sources: [imported], planVersion: 2 })
+  assert.equal(plan.status, 'ready')
+  assert.deepEqual(plan.tasks[0].practice.frequency, candidate.practice.frequency)
+  assert.deepEqual(plan.tasks[0].practice.reviewAfter, candidate.practice.reviewAfter)
+  const recommended = { ...candidate, practice }
+  const fallback = setup({ plan: () => success(proposal([recommended])),
+    review: () => success({ verdicts: [{ id: recommended.id, verdict: 'supported' }] }) })
+  const recommendation = await fallback.service.planLearning({ sources: [imported], planVersion: 2 })
+  assert.equal(recommendation.status, 'ready')
+  assert.deepEqual(recommendation.tasks[0].practice.frequency, practice.frequency)
+})
+
 test('V2 移除循环、无效前置、伪造周期引用和未通过独立核验的任务及依赖', async () => {
   const { service, calls } = setup({
     plan: () => success(proposal([

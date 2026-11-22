@@ -36,17 +36,34 @@ export function hasValidSourceRefs(refs, evidenceById) {
   ))
 }
 
+const chineseTime = String.raw`(\d+)\s*(分钟|小时|自然日|天)`
+const nextSession = String.raw`(?:进行|开始|做)?\s*下一次[^，,:：。]{0,12}(?:练习|训练)`
+const nextPractice = String.raw`(?:(?:再|再次)\s*(?:进行|开始|做)?\s*[^，,:：。]{0,12}(?:练习|训练|练)|${nextSession})`
+const practiceIntervals = [
+  new RegExp(String.raw`(?:两次[^，,:：。]{0,12}(?:练习|训练)(?:之间)?\s*(?:至少)?\s*(?:相隔|间隔)|(?:练习|训练)间隔(?:为|是)?)\s*(?:至少\s*)?${chineseTime}`, 'gu'),
+  new RegExp(String.raw`(?:相隔|间隔)\s*(?:至少\s*)?${chineseTime}\s*[，,]?\s*${nextPractice}`, 'gu'),
+  new RegExp(String.raw`(?:^|[，,:：])\s*(?:至少\s*)?${chineseTime}\s*(?:之后|后)?\s*[，,]?\s*${nextPractice}`, 'gu'),
+  new RegExp(String.raw`(?:休息|等待)\s*(?:至少\s*)?${chineseTime}\s*(?:之后|后)?\s*[，,]?\s*(?:再\s*)?${nextSession}`, 'gu'),
+  new RegExp(String.raw`每(?:隔)?\s*${chineseTime}\s*[，,]?\s*(?:练习|训练)`, 'gu'),
+  new RegExp(String.raw`^\s*每(?:隔)?\s*${chineseTime}\s*[，,]?\s*重复一次\s*$`, 'gu'),
+  /\b(?:every\s+|(?:rest|wait)\s+(?:for\s+)?(?:at least\s+)?)(\d+)\s*(minutes?|hours?|days?)\s+(?:before\s+(?:the\s+)?next\s+(?:practice|session)|repeat|practice|train)\b/giu,
+  /\b(?:practice sessions?|practice attempts?)\s+(?:are\s+)?(?:at least\s+)?(\d+)\s*(minutes?|hours?|days?)\s+apart\b/giu,
+  /\b(?:after\s+)(\d+)\s*(minutes?|hours?|days?)\s*,?\s*(?:practice|train|repeat)\s+again\b/giu,
+]
+const reviewIntervals = [
+  new RegExp(String.raw`(?:^|[，,:：]|(?:完成|结束)后)\s*${chineseTime}\s*(?:之后|后)\s*[，,]?\s*(?:复核|复查|复盘|回顾|评估)`, 'gu'),
+  new RegExp(String.raw`(?:复核|复查|复盘|回顾|评估)间隔(?:为|是)?\s*${chineseTime}`, 'gu'),
+  new RegExp(String.raw`每(?:隔)?\s*${chineseTime}\s*(?:复核|复查|复盘|回顾|评估)`, 'gu'),
+  /\b(?:after|every)\s+(\d+)\s*(minutes?|hours?|days?)\s*,?\s*(?:review|recheck|reassess)\b/giu,
+  /\b(?:review|recheck|reassess)\s+(?:after|every)\s+(\d+)\s*(minutes?|hours?|days?)\b/giu,
+]
+
 export function explicitElapsedMinutes(refs, purpose = 'frequency') {
-  const review = /复核|复查|复盘|回顾|评估|\b(?:review|recheck|reassess)\b/iu
-  const intervals = [
-    /(?:每隔|每|间隔|相隔)\s*(?:至少\s*)?(\d+)\s*(分钟|小时|自然日|天)/gu,
-    /(\d+)\s*(分钟|小时|自然日|天)\s*(?:之后|后|再练|再次)/gu,
-    /\b(?:every|after)\s+(\d+)\s*(minutes?|hours?|days?)\b/giu,
-    /\b(\d+)\s*(minutes?|hours?|days?)\s+(?:apart|between|before the next)\b/giu,
-  ]
-  return refs.flatMap(({ excerpt }) => excerpt.normalize('NFKC').split(/[。；！？;\r\n]/u)
-    .filter((clause) => review.test(clause) === (purpose === 'reviewAfter'))
-    .flatMap((clause) => intervals.flatMap((pattern) => [...clause.matchAll(pattern)].map(([, amount, unit]) => {
+  const patterns = purpose === 'reviewAfter' ? reviewIntervals : practiceIntervals
+  const withinPractice = /(?:单次|本次|每次|一次)[^，,]{0,12}(?:练习|训练)(?:中|内|期间)|\b(?:during|within)\s+(?:each|a|the same)\s+(?:practice|training|session)\b/iu
+  return refs.flatMap(({ excerpt }) => excerpt.normalize('NFKC').split(/[。；！？;!?\r\n]|\.(?!\d)/u)
+    .filter((sentence) => !withinPractice.test(sentence))
+    .flatMap((sentence) => patterns.flatMap((pattern) => [...sentence.matchAll(pattern)].map(([, amount, unit]) => {
       const factor = /小时|^hour/iu.test(unit) ? 60 : /自然日|天|^day/iu.test(unit) ? 1440 : 1
       return Number(amount) * factor
     }))))
@@ -58,8 +75,10 @@ export function isValidPracticeTiming(timing, evidenceById, purpose, historical 
   if (timing.basis === 'source') {
     if (!hasValidSourceRefs(timing.sourceRefs, evidenceById)) return false
     if (historical) return true
-    const intervals = explicitElapsedMinutes(timing.sourceRefs, purpose)
-    return timing.unit === 'elapsedMinutes' && intervals.length > 0 && intervals.every((minutes) => timing.interval === minutes)
+    return timing.unit === 'elapsedMinutes' && timing.sourceRefs.every((ref) => {
+      const intervals = explicitElapsedMinutes([ref], purpose)
+      return intervals.length > 0 && intervals.every((minutes) => timing.interval === minutes)
+    })
   }
   return timing.basis === 'recommendation' && timing.unit === 'learningDay' && timing.sourceRefs === undefined
 }
