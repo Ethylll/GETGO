@@ -1,7 +1,7 @@
 import { hasValidSourceRefs, indexSourceEvidence, isValidLearningPlan, isValidV2Task } from './services/validateLearningPlan.js'
 import { ANSWER_LIMIT, CITATION_LIMIT, isEvidenceAnswer, QUESTION_LIMIT, validatedLearningFeedback } from './chatMessages.js'
 import { sourceText } from './learningSources.js'
-import { activeLearningPlan, snapshotDailyTask } from './learningDays.js'
+import { activeLearningPlan, simulatedMinute, snapshotDailyTask } from './learningDays.js'
 import { storedObservations } from './learningObservation.js'
 import { restoredAgentState } from './learningAgent.js'
 import { clarificationContext } from './teachingInteractions.js'
@@ -142,6 +142,7 @@ function validDailySession(session) {
   const evidence = indexSourceEvidence(plan.sources)
   return days.every((day, index) => {
     if (day?.id !== `day-${index + 1}` || day.dayNumber !== index + 1 || !Number.isFinite(day.startedAt) || day.startedAt < 0 ||
+      (day.simulatedMinute !== undefined && day.simulatedMinute !== simulatedMinute(day.dayNumber)) ||
       (index > 0 && day.startedAt !== days[index - 1].endedAt) ||
       (index === days.length - 1 ? day.endedAt !== null : !Number.isFinite(day.endedAt) || day.endedAt < day.startedAt) ||
       !validLimits(day.limits) || !Array.isArray(day.instances) ||
@@ -163,7 +164,7 @@ export function saveDailyLearningSession(session, storage) {
     const messages = storedMessages(session.messages, plan, { ...session, agent })
     const snapshot = { version: 2, projectId, revision, limits, plan, effectivePlan: effective && { ...effective, sources: undefined },
       days: days.map(({ id, dayNumber, startedAt, endedAt, limits: dayLimits, instances }) => ({
-        id, dayNumber, startedAt, endedAt, limits: dayLimits,
+        id, dayNumber, simulatedMinute: simulatedMinute(dayNumber), startedAt, endedAt, limits: dayLimits,
         instances: instances.map(({ id: instanceId, task, status, startedAt: start, completedAt, optional, feedback, held }) => ({
           id: instanceId, task: snapshotDailyTask(task), status, startedAt: start, completedAt, optional, feedback,
           ...(held ? { held: true } : {}),
@@ -197,7 +198,8 @@ export function loadLearningSession(storage) {
       if (!validDailySession(snapshot)) return { status: 'invalid', reason: 'data' }
       const agent = snapshot.agent ? restoredAgentState(snapshot.agent, snapshot) : undefined
       const messages = storedMessages(snapshot.messages, snapshot.plan, { ...snapshot, agent })
-      const session = { ...snapshot, ...(agent ? { agent } : {}), messages,
+      const days = snapshot.days.map((day) => ({ ...day, simulatedMinute: simulatedMinute(day.dayNumber) }))
+      const session = { ...snapshot, days, ...(agent ? { agent } : {}), messages,
         observations: storedObservations(snapshot.observations, new Set(snapshot.days.map(({ id }) => id)), messages) }
       return { status: 'restored', plan: activeLearningPlan(session), session }
     }

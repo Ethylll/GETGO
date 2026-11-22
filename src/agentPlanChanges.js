@@ -174,7 +174,7 @@ export function applyPlanDelta(session, delta, now, startedTaskId) {
   const effectivePlan = { ...plan, entryTaskId, tasks }
   if (tasks.length > 32 || !isValidLearningPlan(effectivePlan, plan.sources)) return null
   const affected = new Set([...delta.tasks, ...delta.schedule].map(({ taskId }) => taskId))
-  return reviseOpenLearningDay({ ...session, effectivePlan, agent: { ...session.agent, schedule: [...schedule.values()] } }, affected, now, startedTaskId)
+  return reviseOpenLearningDay({ ...session, effectivePlan, agent: { ...session.agent, schedule: [...schedule.values()] } }, affected, startedTaskId)
 }
 
 export function reversePlanDelta(delta) {

@@ -1,5 +1,5 @@
 import { validatedLearningFeedback } from './chatMessages.js'
-import { activeLearningPlan, getOneTimeProgress } from './learningDays.js'
+import { activeLearningPlan, getOneTimeProgress, simulatedMinute } from './learningDays.js'
 import { sourceText } from './learningSources.js'
 
 const EVENT_LIMIT = 32
@@ -68,10 +68,12 @@ function describeTask(task) {
     ...(task.practice ? { frequency: { unit: task.practice.frequency.unit, interval: task.practice.frequency.interval } } : {}) }
 }
 
-function describeInstance(item) {
+function describeInstance(item, day) {
+  const outcome = item.status === 'completed' ? 'completed'
+    : item.held ? 'held' : day.endedAt === null ? 'open' : 'unfinished'
   return { evidenceId: `instance:${item.id}`, id: item.id, taskId: item.task.id, title: field(item.task.title, 120),
     type: item.task.type, optional: item.optional, status: item.status, startedAt: item.startedAt,
-    completedAt: item.completedAt, ...(item.held ? { held: true } : {}),
+    completedAt: item.completedAt, outcome, dayNumber: day.dayNumber,
     selfChecks: item.feedback.slice(0, 4).map((value) => field(value, 120)) }
 }
 
@@ -81,11 +83,12 @@ function describeAdjustments(adjustments, days, knownTasks, turns) {
     Array.isArray(item.taskIds) && item.taskIds.some((id) => knownTasks.has(id))).slice(-ADJUSTMENT_LIMIT).map((item) => {
     const taskIds = item.taskIds.filter((id) => knownTasks.has(id)).slice(0, TASK_LIMIT)
     const firstDay = days.findIndex(({ id }) => id === item.dayId)
-    const practice = days.slice(firstDay).flatMap(({ instances }) => instances.filter(({ task, startedAt }) =>
-      taskIds.includes(task.id) && startedAt !== null && startedAt >= item.appliedAt))
+    const practice = days.slice(firstDay).flatMap((day) => day.instances.filter(({ task, startedAt }) =>
+      taskIds.includes(task.id) && startedAt !== null && startedAt >= item.appliedAt).map((instance) => describeInstance(instance, day)))
     const followUp = turns.filter((turn) => taskIds.includes(turn.taskId) && turn.createdAt >= item.appliedAt && turn.feedback)
     return { receiptId: `receipt:${item.id}`, action: field(item.action, 40), appliedAt: item.appliedAt, taskIds,
-      subsequentPractice: practice.slice(-3).map(describeInstance), waitingForPractice: practice.length === 0,
+      dayNumber: days[firstDay].dayNumber,
+      subsequentPractice: practice.slice(-3), waitingForPractice: practice.length === 0,
       subsequentFeedback: followUp.slice(-3).map(({ id, dayId, taskId, feedback }) => ({
         evidenceId: `message:${id}`, dayId, taskId, feedback,
       })) }
@@ -99,7 +102,8 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
   const plan = activeLearningPlan(session)
   const trigger = session.messages.find(({ id }) => id === event.messageId)
   const seed = new Set([trigger?.taskId, ...current.instances.map(({ task }) => task.id)].filter(Boolean))
-  const instances = session.days.flatMap(({ instances }) => instances)
+  const daysById = new Map(session.days.map((day) => [day.id, day]))
+  const instances = session.days.flatMap((day) => day.instances.map((instance) => ({ ...instance, day })))
   const knownTasks = new Map(instances.map(({ task }) => [task.id, task]))
   for (const task of plan.tasks) knownTasks.set(task.id, task)
   const relatedIds = new Set(seed)
@@ -131,9 +135,9 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
     if (!sources.has(key)) sources.set(key, { evidenceId: `source:${key}`, sourceId, title: field(source.title, 120), excerpt: clipped })
   }
   const recentDays = session.days.slice(-DAY_LIMIT).map((day) => ({
-    id: day.id, dayNumber: day.dayNumber, startedAt: day.startedAt, endedAt: day.endedAt,
+    id: day.id, dayNumber: day.dayNumber, simulatedMinute: simulatedMinute(day.dayNumber), closed: day.endedAt !== null,
     instanceCount: day.instances.filter(({ held }) => !held).length,
-    instances: day.instances.slice(0, 8).map(describeInstance),
+    instances: day.instances.slice(0, 8).map((item) => describeInstance(item, day)),
   }))
   const oneTime = getOneTimeProgress(session.days)
   const summaries = selectedTasks.map((id) => {
@@ -143,19 +147,36 @@ export function buildLearningObservation(session, event, { adjustments = [] } = 
     const missed = previous.findLastIndex(({ status }) => status === 'completed')
     return { taskId: id, completedInstances: records.filter(({ status }) => status === 'completed').length,
       consecutiveUnfinishedOffers: previous.slice(missed + 1).length,
-      latestPractice: records.filter(({ task, startedAt }) => task.type === 'recurring' && startedAt !== null).slice(-2).map(describeInstance) }
+      latestPractice: records.filter(({ task, startedAt }) => task.type === 'recurring' && startedAt !== null).slice(-2)
+        .map((item) => describeInstance(item, item.day)) }
   })
   return {
     projectId: session.projectId, dayId: current.id, revision: session.revision, event,
+    simulatedMinute: simulatedMinute(current.dayNumber),
     plan: { topic: field(plan.topic, 160), initialTasks: session.plan.tasks.filter(({ id }) => selectedTasks.includes(id)).map(describeTask),
       effectiveTasks: plan.tasks.filter(({ id }) => selectedTasks.includes(id)).map(describeTask),
       oneTime: { completed: plan.tasks.filter(({ id, type }) => type === 'oneTime' && oneTime.has(id)).length,
         planned: plan.tasks.filter(({ type }) => type === 'oneTime').length } },
     recentDays, summaries, sources: [...sources.values()],
     messages: selectedTurns.map(({ id, dayId, instanceId, taskId, question, answer, status, feedback, createdAt, clarificationId }) => ({
-      evidenceId: `message:${id}`, dayId, instanceId, taskId, question: field(question, 320),
+      evidenceId: `message:${id}`, dayId, dayNumber: daysById.get(dayId)?.dayNumber, instanceId, taskId, question: field(question, 320),
       helpProvided: field(answer, 320), status, feedback, createdAt, ...(clarificationId ? { clarificationId } : {}),
     })),
     adjustments: describeAdjustments(adjustments, session.days, knownTasks, turns),
+  }
+}
+
+// Local wall-clock stamps are available for legacy record ordering and diagnostics.
+// Only simulated day coordinates and observed behavior are sent for teaching.
+export function observationForModel(frame) {
+  const instance = ({ startedAt, completedAt, ...entry }) => entry
+  const message = ({ createdAt, ...entry }) => entry
+  return { ...frame,
+    recentDays: frame.recentDays.map((day) => ({ ...day, instances: day.instances.map(instance) })),
+    summaries: frame.summaries.map((summary) => ({ ...summary, latestPractice: summary.latestPractice.map(instance) })),
+    adjustments: frame.adjustments.map(({ appliedAt, subsequentPractice, ...entry }) =>
+      ({ ...entry, subsequentPractice: subsequentPractice.map(instance) })),
+    messages: frame.messages.map(message),
+    priorNotes: frame.priorNotes?.map(message),
   }
 }

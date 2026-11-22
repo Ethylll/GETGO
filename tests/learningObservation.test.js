@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { scopedChatTurns, updateScopedChatMessages, validatedLearningFeedback } from '../src/chatMessages.js'
 import { createDailySession, updateLearningDay } from '../src/learningDays.js'
-import { buildLearningObservation, saveWithLearningObservation } from '../src/learningObservation.js'
+import { buildLearningObservation, observationForModel, saveWithLearningObservation } from '../src/learningObservation.js'
 import { LEARNING_SESSION_KEY, loadLearningSession, saveDailyLearningSession } from '../src/learningSessionStorage.js'
 import { makePlan, makeTask, sourceRefs } from './fixtures/dailyLearningPlan.js'
 
@@ -52,6 +52,19 @@ test('切日先将旧日、问答和新日一起写入，随后才释放去重�
   assert.equal(nowDay(failed.session).dayNumber, 2)
   assert.equal(failed.event, null)
   assert.equal(buildLearningObservation(failed.session, saved.event), null)
+})
+
+test('模型只见模拟日时钟，封存的未开始和进行中均记未完成，开放日暂不判定', () => {
+  const before = action(newSession(), 'start', 'practice')
+  const { session, event } = saveWithLearningObservation(before, advance(before), { type: 'advance' }, () => true)
+  const frame = observationForModel(buildLearningObservation(session, event))
+  assert.equal(frame.simulatedMinute, 1440)
+  assert.deepEqual(frame.recentDays.map(({ closed, simulatedMinute }) => [closed, simulatedMinute]), [[true, 0], [false, 1440]])
+  assert.deepEqual(frame.recentDays[0].instances.map(({ status, outcome }) => [status, outcome]),
+    [['notStarted', 'unfinished'], ['inProgress', 'unfinished']])
+  assert.ok(frame.recentDays[1].instances.every(({ outcome }) => outcome === 'open'))
+  assert.equal(Object.hasOwn(frame.recentDays[0].instances[1], 'startedAt'), false)
+  assert.equal(frame.summaries.find(({ taskId }) => taskId === 'practice').consecutiveUnfinishedOffers, 1)
 })
 
 test('普通知识问答、勾选与重复反馈不会提供即时观察；首次任务困难可独立于答疑结果入队', () => {

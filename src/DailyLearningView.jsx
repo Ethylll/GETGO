@@ -248,11 +248,12 @@ export default function DailyLearningView({ initialPlan, sourceFiles, restored }
           onAction={changeTask} isReviewing={Boolean(review)} />}
         <TeachingUpdates session={session} day={day} review={review} taskTitles={taskTitles} tools={tools} onCommand={decideChange}
           onOpenChat={tools.openChat} />
-        <footer className="mt-6 border-t border-line pt-4">
-          {completed < required.length && <p className="mb-2 text-xs text-muted">还有未完成任务，原记录会保留。</p>}
-          <button key={day.id} type="button" className="secondary-button min-h-11 rounded-full px-4 text-sm font-semibold" onClick={advance}
+        <footer className="mt-6 flex flex-wrap items-center justify-end gap-x-3 border-t border-line pt-3">
+          {completed < required.length && <p className="mr-auto text-xs text-muted">还有未完成任务，原记录会保留。</p>}
+          <button key={day.id} type="button" className="min-h-10 rounded-lg px-2 text-xs text-muted underline-offset-4 hover:underline" onClick={advance}
+            title="推进 24 小时模拟学习时间"
             onKeyDown={(event) => { if (event.repeat) event.preventDefault() }}>
-            进入下一学习日
+            下一日
           </button>
         </footer>
       </article>

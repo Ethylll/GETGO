@@ -1,7 +1,7 @@
 import { AGENT_ACTIONS, EMPTY_AGENT_STATE, normalizeAgentDecision, prepareAgentAction } from './agentActions.js'
 import { shortText, validStoredPlanDelta } from './agentPlanChanges.js'
 import { activeLearningPlan } from './learningDays.js'
-import { buildLearningObservation } from './learningObservation.js'
+import { buildLearningObservation, observationForModel } from './learningObservation.js'
 import { hasValidSourceRefs, indexSourceEvidence } from './services/validateLearningPlan.js'
 
 export const AGENT_BUDGET = Object.freeze({ tools: 3, decisions: 4, modelCalls: 5, totalMs: 34_000 })
@@ -67,8 +67,8 @@ function frameForRound(session, event) {
   const prompt = reply && agent.notes.find(({ id }) => id === reply.clarificationId)
   const notes = [...new Set([prompt, ...agent.notes.slice(-6)].filter(Boolean))].slice(0, 6)
   return { ...observation, ...(prompt ? { clarification: { promptId: `note:${prompt.id}`, replyId: `message:${reply.id}` } } : {}),
-    priorNotes: notes.map(({ id, type, taskId, text, createdAt }) => ({
-    evidenceId: `note:${id}`, type, taskId, text, createdAt,
+    priorNotes: notes.map(({ id, type, taskId, text, dayId }) => ({
+    evidenceId: `note:${id}`, type, taskId, text, dayId,
   })), recentProposals: agent.changes.slice(-6).map(({ id, taskIds, status, action, reason }) => ({
     id, taskIds, status, action: action.type, reason,
   })) }
@@ -149,7 +149,7 @@ export async function runLearningAgent(event, { commit, request = requestAgentSt
       if (!frame || round.status !== 'running') return await finish('stale')
       const receipts = round.steps.map(({ receipt }) => receipt)
       const waiting = receipts.some(({ awaitsUser }) => awaitsUser)
-      const answer = await tell({ operation: 'decide', frame, receipts, remainingTools: waiting ? 0 : budget.tools - tools })
+      const answer = await tell({ operation: 'decide', frame: observationForModel(frame), receipts, remainingTools: waiting ? 0 : budget.tools - tools })
       const decision = normalizeAgentDecision(answer.decision)
       if (!decision) return await finish('failed')
       if (waiting && decision.type === 'act') return await finish('waiting')

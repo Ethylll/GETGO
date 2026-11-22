@@ -51,19 +51,20 @@ test('主动跨日封存真实时间和未完成状态，同自然日推进也�
   assert.equal(getOneTimeProgress(last.days).size, 0)
 })
 
-test('Day 节律沿本次安排递进，自然间隔沿实际练习计时，跨学习日不伪造时间', () => {
+test('48 小时间隔仅依模拟时间，同一墙钟到 Day 3 即到期', () => {
   const natural = { ...practice, frequency: { unit: 'elapsedMinutes', interval: 2880, basis: 'source',
     sourceRefs: [{ sourceId: 'src_1', excerpt: '两次练习相隔48小时。' }] } }
   const everyTwo = { ...practice, frequency: { ...practice.frequency, interval: 2 } }
   const plan = makePlan([makeTask('elapsed', { type: 'recurring', practice: natural }),
     makeTask('learningDay', { type: 'recurring', practice: everyTwo })])
-  let session = finish(newSession(plan), 'elapsed')
-  session = advance(session)
-  assert.deepEqual(ids(session), [])
-  session = advance(session)
-  assert.deepEqual(ids(session), ['learningDay'])
-  session = advance(session, at + 2880 * 60_000 + 1)
-  assert.deepEqual(ids(session), ['elapsed'])
+  const first = finish(newSession(plan), 'elapsed')
+  const second = advance(first)
+  assert.deepEqual(ids(second), [])
+  assert.deepEqual(ids(advance(first, at + 2880 * 60_000 + 1)), [])
+  const session = advance(second)
+  assert.deepEqual(ids(session), ['elapsed', 'learningDay'])
+  assert.deepEqual(session.days.map(({ simulatedMinute }) => simulatedMinute), [0, 1440, 2880])
+  assert.equal(current(session).startedAt, at + 1)
   assert.deepEqual([...getOneTimeProgress(session.days)], [])
 })
 
@@ -155,6 +156,13 @@ test('V2 快照恢复原始与有效计划、封存实例和发送日，原文�
   assert.equal(loaded.session.days[0].instances[0].completedAt, at + 1)
   assert.deepEqual(loaded.session.messages, [session.messages[0]])
   assert.deepEqual(ids(loaded.session), ids(session))
+  assert.deepEqual(raw.days.map(({ simulatedMinute }) => simulatedMinute), [0, 1440])
+  delete raw.days[0].simulatedMinute
+  delete raw.days[1].simulatedMinute
+  storage.setItem(LEARNING_SESSION_KEY, JSON.stringify(raw))
+  const legacy = loadLearningSession(storage).session
+  assert.equal(current(legacy).simulatedMinute, 1440)
+  assert.equal(current(advance(legacy)).simulatedMinute, 2880)
 
   raw.days[0].instances[0].task.steps[0].sourceRefs[0].excerpt = '伪造引用'
   storage.setItem(LEARNING_SESSION_KEY, JSON.stringify(raw))

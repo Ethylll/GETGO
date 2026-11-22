@@ -25,6 +25,7 @@ export function snapshotDailyTask(task) {
 }
 
 export const activeLearningPlan = ({ plan, effectivePlan }) => effectivePlan ? { ...effectivePlan, sources: plan.sources } : plan
+export const simulatedMinute = (dayNumber) => (dayNumber - 1) * 1440
 
 function taskRecords(days) {
   const records = new Map()
@@ -33,7 +34,7 @@ function taskRecords(days) {
       if (instance.held) continue
       const record = { ...records.get(instance.task.id) }
       if (!instance.optional || instance.startedAt !== null) record.offeredDay = day.dayNumber
-      if (instance.startedAt !== null) record.lastPracticedAt = instance.completedAt ?? instance.startedAt
+      if (instance.startedAt !== null) record.lastPracticedMinute = simulatedMinute(day.dayNumber)
       if (instance.status === 'completed') {
         record.completed = true
         record.feedback = new Set([...(record.feedback ?? []), ...instance.feedback])
@@ -52,18 +53,18 @@ function prerequisitesMet(task, records) {
   })
 }
 
-function isDue(task, record, dayNumber, now) {
+function isDue(task, record, dayNumber) {
   if (!task.practice) return !record?.completed
   if (!record) return true
   const { unit, interval } = task.practice.frequency
   return unit === 'elapsedMinutes'
-    ? record.lastPracticedAt === undefined || now - record.lastPracticedAt >= interval * 60_000
+    ? record.lastPracticedMinute === undefined || simulatedMinute(dayNumber) - record.lastPracticedMinute >= interval
     : record.offeredDay === undefined || dayNumber - record.offeredDay >= interval
 }
 
-function eligibleTasks(plan, records, dayNumber, now, schedule) {
+function eligibleTasks(plan, records, dayNumber, schedule) {
   return plan.tasks.filter((task) => (schedule.get(task.id)?.notBefore ?? 0) <= dayNumber &&
-    prerequisitesMet(task, records) && isDue(task, records.get(task.id), dayNumber, now))
+    prerequisitesMet(task, records) && isDue(task, records.get(task.id), dayNumber))
 }
 
 function assignInstances(day, tasks, optional) {
@@ -87,12 +88,13 @@ function assignInstances(day, tasks, optional) {
 
 function openDay(session, startedAt) {
   const dayNumber = session.days.length + 1
-  const day = { id: `day-${dayNumber}`, dayNumber, startedAt, endedAt: null, limits: { ...session.limits }, instances: [] }
+  const day = { id: `day-${dayNumber}`, dayNumber, simulatedMinute: simulatedMinute(dayNumber), startedAt, endedAt: null,
+    limits: { ...session.limits }, instances: [] }
   const plan = activeLearningPlan(session)
   const records = taskRecords(session.days)
   const schedule = new Map((session.agent?.schedule ?? []).map((item) => [item.taskId, item]))
   const priority = (id) => Number(schedule.get(id)?.priorityDay === dayNumber)
-  const tasks = eligibleTasks(plan, records, dayNumber, startedAt, schedule).sort((left, right) =>
+  const tasks = eligibleTasks(plan, records, dayNumber, schedule).sort((left, right) =>
     priority(right.id) - priority(left.id) || Number(Boolean(left.auxiliary)) - Number(Boolean(right.auxiliary)) ||
     (dayNumber === 1 ? Number(right.id === plan.entryTaskId) - Number(left.id === plan.entryTaskId)
       : (records.get(left.id)?.offeredDay ?? 0) - (records.get(right.id)?.offeredDay ?? 0)))
@@ -126,7 +128,7 @@ export function currentDayInstances(session) {
   })
 }
 
-export function reviseOpenLearningDay(session, affectedIds, now, startedTaskId) {
+export function reviseOpenLearningDay(session, affectedIds, startedTaskId) {
   const day = session.days.at(-1)
   const history = session.days.slice(0, -1)
   const plan = activeLearningPlan(session)
@@ -164,7 +166,7 @@ export function reviseOpenLearningDay(session, affectedIds, now, startedTaskId) 
   }
   next.instances.sort((left, right) => day.instances.findIndex(({ id }) => id === left.id) -
     day.instances.findIndex(({ id }) => id === right.id))
-  const candidates = eligibleTasks(plan, records, day.dayNumber, now, schedule)
+  const candidates = eligibleTasks(plan, records, day.dayNumber, schedule)
     .filter(({ id }) => affectedIds.has(id) && !day.instances.some(({ task }) => task.id === id))
   next = assignInstances(next, candidates, true)
   return { ...session, days: [...history, next] }
@@ -197,7 +199,7 @@ export function updateLearningDay(session, action) {
     const before = taskRecords(session.days)
     const after = taskRecords([...past, day])
     const schedule = new Map((session.agent?.schedule ?? []).map((item) => [item.taskId, item]))
-    const newlyUnlocked = eligibleTasks(plan, after, day.dayNumber, now, schedule).filter((task) => !prerequisitesMet(task, before))
+    const newlyUnlocked = eligibleTasks(plan, after, day.dayNumber, schedule).filter((task) => !prerequisitesMet(task, before))
     day = assignInstances(day, newlyUnlocked, true)
   }
   return { ...session, days: [...past, day], revision: session.revision + 1 }
