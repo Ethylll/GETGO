@@ -18,6 +18,7 @@ GETGO 是面向技能自学者的 Web Demo。粘贴教程或笔记，或上传�
 
 ## 项目文档
 
+- [作品集](docs/开练GETGO.pdf)
 - [正式产品需求](docs/prd.md)
 - [部分设计决策](docs/decisions.md)
 
